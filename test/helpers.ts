@@ -17,19 +17,22 @@ export const SERVICE_ACCOUNT = JSON.stringify({
   private_key_id: "test-key",
 });
 
-/** The shell as the site builds it, cut down to what the Worker touches. */
+/**
+ * The shell as the site builds it, cut down to what the Worker touches: the
+ * `<head>`, and the inline RSC payload that repeats its title and description.
+ */
 export const SHELL_HTML = `<!DOCTYPE html><html lang="en"><head>
 <meta charSet="utf-8"/>
 <title>Profile Not Found | Clusterflick</title>
-<meta name="description" content="There's no public profile at this address."/>
-<meta name="robots" content="noindex"/>
-<link rel="canonical" href="https://clusterflick.com/profile-shell/"/>
+<meta name="description" content="No public profile at this address."/>
 <meta property="og:title" content="Clusterflick – Every film showing in London"/>
 <meta property="og:description" content="Every film showing in London"/>
-<meta property="og:url" content="https://clusterflick.com"/>
+<meta property="og:url" content="https://clusterflick.com/"/>
 <meta name="twitter:title" content="Clusterflick – Every film showing in London"/>
 <meta name="twitter:description" content="Every film showing in London"/>
-</head><body><main id="profile"></main></body></html>`;
+</head><body><main id="profile"></main>
+<script>self.__next_f.push([1,"[[\\"$\\",\\"title\\",\\"0\\",{\\"children\\":\\"Profile Not Found | Clusterflick\\"}],[\\"$\\",\\"meta\\",\\"1\\",{\\"name\\":\\"description\\",\\"content\\":\\"No public profile at this address.\\"}]]"])</script>
+</body></html>`;
 
 /** A JavaScript value as a Firestore REST value, as the SDK would store it. */
 export function encodeValue(value: unknown): Record<string, unknown> {

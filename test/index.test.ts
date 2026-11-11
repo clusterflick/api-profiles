@@ -108,6 +108,12 @@ describe("a public profile", () => {
       },
     });
     expect(html).toContain("<title>film-fan's films | Clusterflick</title>");
+    // Replaced in the RSC payload too, or the browser would put them back.
+    expect(html).not.toContain("Profile Not Found");
+    expect(html).not.toContain("No public profile at this address.");
+    expect(html).toContain(
+      '\\"children\\":\\"film-fan\'s films | Clusterflick\\"',
+    );
     expect(html).toContain('<meta name="robots" content="index, follow"');
     expect(html).toContain(
       '<link rel="canonical" href="https://clusterflick.com/u/film-fan/"',
@@ -121,6 +127,10 @@ describe("a public profile", () => {
     expect(html).toContain(
       "film-fan has seen 2 films and has 1 film on their watchlist",
     );
+    expect(html.match(/<meta name="robots"[^>]*>/g)).toEqual([
+      '<meta name="robots" content="index, follow"/>',
+    ]);
+    expect(html.match(/<link rel="canonical"[^>]*>/g)).toHaveLength(1);
     expect(html).not.toContain("uid1");
     expect(html).not.toContain("The Rio");
   });
@@ -212,10 +222,12 @@ describe("not found", () => {
     },
   );
 
-  it("keeps the shell's noindex and title, and drops its canonical", async () => {
+  it("is noindex, with the shell's title and no canonical", async () => {
     serve({});
     const { html } = await readProfileData(await get("/u/film-fan/"));
-    expect(html).toContain('<meta name="robots" content="noindex"/>');
+    expect(html.match(/<meta name="robots"[^>]*>/g)).toEqual([
+      '<meta name="robots" content="noindex"/>',
+    ]);
     expect(html).toContain("<title>Profile Not Found | Clusterflick</title>");
     expect(html).not.toContain('rel="canonical"');
   });

@@ -85,11 +85,20 @@ choose to publish. A not-found page gets `{ "found": false, "handle": "…" }`;
 the handle is there only when the path held a valid one, so the page can tell
 its owner why their profile isn't showing.
 
-For a public profile the Worker also rewrites the `<head>`: the title,
-description, Open Graph and Twitter tags, the canonical link, and `robots` from
-the shell's `noindex` to `index, follow`. Making a profile public is the consent
-to its being found. It is never in the sitemap. A not-found page keeps the
-shell's `noindex` and generic title, and loses its canonical link.
+For a public profile the Worker also describes it in the `<head>`: the title
+and description, the Open Graph and Twitter tags, a canonical link to
+`/u/<handle>/`, and `robots` of `index, follow`. Making a profile public is the
+consent to its being found. It is never in the sitemap. A not-found page gets
+`noindex`, and keeps the shell's generic title.
+
+Next renders the `<head>` again in the browser from the page's inline RSC
+payload, so the shell's own tags would come back after hydration. So the shell
+has no `robots` or canonical of its own, and its title and description
+(`SHELL_TITLE`, `SHELL_DESCRIPTION`) are fixed strings the Worker replaces
+everywhere in the page, the payload included. They must match the site's
+`PROFILE_SHELL_TITLE` and `PROFILE_SHELL_DESCRIPTION`; if they don't, the
+Worker logs an error and the page keeps the shell's. The Open Graph and Twitter
+tags are only rewritten in the HTML as sent, which is what link previews read.
 
 ## CPU
 
