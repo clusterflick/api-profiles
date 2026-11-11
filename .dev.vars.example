@@ -1,0 +1,9 @@
+# Copy to .dev.vars for `npm run dev`.
+#
+# The service account's JSON key, on one line, in single quotes:
+#   node -e 'console.log(`FIREBASE_SERVICE_ACCOUNT=\x27${JSON.stringify(require("./key.json"))}\x27`)' >> .dev.vars
+# `npm run dev` reads the live project with it, read-only.
+FIREBASE_SERVICE_ACCOUNT=
+
+# The site's `next dev`, which serves the shell page.
+SITE_ORIGIN=http://localhost:3000

@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clusterflick-api-profiles",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  // Everything under /u is this Worker's. `/u/*` also matches `/u/`, but not
+  // the bare `/u`, so that gets a route of its own.
+  "routes": [
+    { "pattern": "clusterflick.com/u/*", "zone_name": "clusterflick.com" },
+    { "pattern": "clusterflick.com/u", "zone_name": "clusterflick.com" },
+  ],
+  "workers_dev": false,
+  "vars": {
+    // Public: it's in the site's Firebase web config too.
+    "FIREBASE_PROJECT_ID": "clusterflick-com",
+    // Where the shell page is fetched from. `.dev.vars` points it at `next dev`.
+    "SITE_ORIGIN": "https://clusterflick.com",
+  },
+  // The service account's JSON key, on one line. Set with
+  // `wrangler secret put FIREBASE_SERVICE_ACCOUNT`, locally in `.dev.vars`.
+  "secrets": { "required": ["FIREBASE_SERVICE_ACCOUNT"] },
+  // api-tmdb-search has 8787; the site's `next dev` sends /u/* here.
+  "dev": { "port": 8788 },
+  "observability": { "enabled": true },
+}
