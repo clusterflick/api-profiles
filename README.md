@@ -49,8 +49,8 @@ Three requests to Firestore's REST API, as a service account:
 
 1. `handles/{handle}`, which holds the owner's uid.
 2. A `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`,
-   `sections`, `displayName`, `links`) and `users/{uid}/meta/capabilities`
-   (`publicProfile`).
+   `sections`, `displayName`, `links`, `favourites`) and
+   `users/{uid}/meta/capabilities` (`publicProfile`).
 3. Only if the profile is to be shown, a `batchGet` of `users/{uid}` (`seen`,
    `watchlist`, `favouriteVenues`) and `users/{uid}/meta/films` (`films`,
    `people`: each film's details, for the Seen stats), for the sections the
@@ -111,6 +111,18 @@ The site keeps the same lists (`FORBIDDEN_NAME_RANGES` and the link patterns
 in `src/lib/user-profile/identity.ts`, and `firestore.rules`): change them
 together.
 
+### Favourite films
+
+`favourites` is up to four films the reader pins to the top of their profile,
+in their order, each its own snapshot (`id`, `title`, and a `year` and
+`posterPath` if it has them) rather than a reference into the Seen list. So
+they're sent whether the Seen list is shown or not, and a hidden Seen list
+stays wholly hidden: nothing is pulled out of it. They're checked again as
+they're read, as the site's rules check them: a film whose id or title
+doesn't fit is dropped, a year or poster that doesn't fit is left off, a
+repeat is kept once, and nothing past four is sent. The title is drawn by the
+page and never written into the `<head>`, so it needs no stripping.
+
 ## What it sends
 
 The page gets this, as `<script type="application/json" id="profile-data">` in
@@ -122,6 +134,7 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
   "handle": "film-fan",
   "displayName": "Siobhán O'Brien",
   "links": { "letterboxd": "film_fan", "imdb": "ur1234567" },
+  "favourites": [{ "id": "949", "title": "Heat", "year": "1995", "posterPath": "/heat.jpg" }],
   "sections": { "watchlist": true, "seen": true, "seenStats": true, "favouriteVenues": false },
   "documents": [
     { "found": { "name": "projects/…/documents/users/-", "fields": { "seen": { "mapValue": { … } } } } },

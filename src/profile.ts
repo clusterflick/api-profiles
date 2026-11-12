@@ -118,6 +118,59 @@ export function readLinks(value: Value | undefined): Links {
   return links;
 }
 
+export const FAVOURITES_MAX = 4;
+
+/**
+ * A favourite film, as the site's `FavouriteFilm`: its own snapshot, not a
+ * reference into the Seen list, so it's sent whether the Seen list is shown
+ * or not. Checked again as it's read, as the site's rules check it.
+ */
+export type FavouriteFilm = {
+  id: string;
+  title: string;
+  year?: string;
+  posterPath?: string;
+};
+
+const FAVOURITE_ID_PATTERN = /^[A-Za-z0-9_-]{1,40}$/;
+const FAVOURITE_YEAR_PATTERN = /^[0-9]{4}$/;
+const FAVOURITE_POSTER_PATTERN = /^\/[A-Za-z0-9._-]{1,100}$/;
+const FAVOURITE_TITLE_MAX_LENGTH = 300;
+
+/**
+ * Up to four favourites in the reader's order: a film whose id or title
+ * doesn't fit is dropped, a year or poster that doesn't fit is left off, and
+ * a film repeated is kept once. The title is sent as data and drawn by the
+ * page, never written into the `<head>`, so it needs no stripping.
+ */
+export function readFavourites(value: Value | undefined): FavouriteFilm[] {
+  const decoded = value === undefined ? undefined : decodeValue(value);
+  if (!Array.isArray(decoded)) return [];
+  const favourites: FavouriteFilm[] = [];
+  const ids = new Set<string>();
+  for (const item of decoded) {
+    if (typeof item !== "object" || item === null || Array.isArray(item))
+      continue;
+    const { id, title, year, posterPath } = item as Record<string, unknown>;
+    if (typeof id !== "string" || !FAVOURITE_ID_PATTERN.test(id)) continue;
+    if (typeof title !== "string") continue;
+    const trimmed = title.trim();
+    if (!trimmed || trimmed.length > FAVOURITE_TITLE_MAX_LENGTH) continue;
+    if (ids.has(id)) continue;
+    ids.add(id);
+    favourites.push({
+      id,
+      title: trimmed,
+      ...(typeof year === "string" &&
+        FAVOURITE_YEAR_PATTERN.test(year) && { year }),
+      ...(typeof posterPath === "string" &&
+        FAVOURITE_POSTER_PATTERN.test(posterPath) && { posterPath }),
+    });
+    if (favourites.length === FAVOURITES_MAX) break;
+  }
+  return favourites;
+}
+
 /** Firestore's `batchGet` answer with nothing in it. */
 const NO_DOCUMENTS = "[]";
 
@@ -133,6 +186,7 @@ export type ProfileData =
       handle: string;
       displayName?: string;
       links: Links;
+      favourites: FavouriteFilm[];
       sections: Sections;
       documents: string;
     }
@@ -168,7 +222,15 @@ export async function loadProfile(
 
   const [profile, capabilities] = await db.batchGet(
     [`users/${uid}/meta/profile`, `users/${uid}/meta/capabilities`],
-    ["handle", "public", "sections", "displayName", "links", "publicProfile"],
+    [
+      "handle",
+      "public",
+      "sections",
+      "displayName",
+      "links",
+      "favourites",
+      "publicProfile",
+    ],
   );
   if (!profile?.handle || decodeValue(profile.handle) !== handle) return null;
   if (!profile.public || decodeValue(profile.public) !== true) return null;
@@ -198,6 +260,7 @@ export async function loadProfile(
     handle,
     ...(displayName && { displayName }),
     links: readLinks(profile.links),
+    favourites: readFavourites(profile.favourites),
     sections,
     documents: documents.replaceAll(uid, "-"),
   };

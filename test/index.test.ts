@@ -152,7 +152,15 @@ describe("a public profile", () => {
       .filter(({ url }) => url.endsWith(":batchGet"))
       .map(({ body }) => JSON.parse(body!).mask.fieldPaths.sort());
     expect(masks).toEqual([
-      ["displayName", "handle", "links", "public", "publicProfile", "sections"],
+      [
+        "displayName",
+        "favourites",
+        "handle",
+        "links",
+        "public",
+        "publicProfile",
+        "sections",
+      ],
       ["favouriteVenues", "films", "people", "seen", "watchlist"],
     ]);
   });
@@ -452,6 +460,86 @@ describe("the name and links", () => {
     serve({ store: reader({}) });
     const { data } = await readProfileData(await get("/u/film-fan/"));
     expect(data.links).toEqual({});
+  });
+});
+
+describe("favourite films", () => {
+  const film = (n: number) => ({
+    id: String(100 + n),
+    title: `Film ${n}`,
+    year: "2001",
+    posterPath: `/poster-${n}.jpg`,
+  });
+
+  function reader(profile: Record<string, unknown>) {
+    const store = publicReader("film-fan", "uid1", {
+      seen: { "101": { title: "Film 1", addedAt: 1 } },
+    });
+    return {
+      ...store,
+      "users/uid1/meta/profile": {
+        handle: "film-fan",
+        public: true,
+        sections: {
+          watchlist: true,
+          seen: false,
+          seenStats: false,
+          favouriteVenues: true,
+        },
+        ...profile,
+      },
+    };
+  }
+
+  it("are sent in order, from the profile, while the Seen list stays hidden", async () => {
+    serve({ store: reader({ favourites: [film(3), film(1)] }) });
+    const { data, html } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.favourites).toEqual([film(3), film(1)]);
+    // Nothing from the Seen list itself: it isn't asked for.
+    const listsMask = firestoreRequests()
+      .filter(({ url }) => url.endsWith(":batchGet"))
+      .map(({ body }) => JSON.parse(body!).mask.fieldPaths)[1];
+    expect(listsMask).not.toContain("seen");
+    expect(JSON.stringify(data.documents)).not.toContain('"seen"');
+    expect(html).toContain("Film 3");
+  });
+
+  it("drops what can't be drawn, repeats, and anything past four", async () => {
+    serve({
+      store: reader({
+        favourites: [
+          film(1),
+          { id: "../x", title: "Bad" },
+          { id: "102", title: "   " },
+          film(1),
+          { ...film(2), year: "c. 1920", posterPath: "https://x.y/p.jpg" },
+          film(3),
+          film(4),
+          film(5),
+        ],
+      }),
+    });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.favourites).toEqual([
+      film(1),
+      { id: "102", title: "Film 2" },
+      film(3),
+      film(4),
+    ]);
+  });
+
+  it("are none when there are none, or they aren't a list", async () => {
+    serve({ store: reader({ favourites: { 0: film(1) } }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.favourites).toEqual([]);
+  });
+
+  it("escapes a title that would close the script tag", async () => {
+    const title = "</script><script>alert(1)</script>";
+    serve({ store: reader({ favourites: [{ id: "101", title }] }) });
+    const { html, data } = await readProfileData(await get("/u/film-fan/"));
+    expect(html).not.toContain("<script>alert(1)");
+    expect(data.favourites).toEqual([{ id: "101", title }]);
   });
 });
 

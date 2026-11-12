@@ -30,7 +30,7 @@ export function toScriptJson(data: ProfileData) {
         data.displayName === undefined
           ? ""
           : `"displayName":${JSON.stringify(data.displayName)},`
-      }"links":${JSON.stringify(data.links)},"sections":${JSON.stringify(data.sections)},"documents":${data.documents}}`
+      }"links":${JSON.stringify(data.links)},"favourites":${JSON.stringify(data.favourites)},"sections":${JSON.stringify(data.sections)},"documents":${data.documents}}`
     : JSON.stringify(data);
   return json.replace(/</g, "\\u003c");
 }

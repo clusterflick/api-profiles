@@ -80,6 +80,7 @@ for (const seen of [2000, 10000]) {
       found: true,
       handle: "film-fan",
       links: {},
+      favourites: [],
       sections: readSections(undefined),
       documents: text.replaceAll(UID, "-"),
     });
