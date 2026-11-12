@@ -152,9 +152,20 @@ describe("a public profile", () => {
       .filter(({ url }) => url.endsWith(":batchGet"))
       .map(({ body }) => JSON.parse(body!).mask.fieldPaths.sort());
     expect(masks).toEqual([
-      ["handle", "public", "publicProfile"],
+      ["handle", "public", "publicProfile", "sections"],
       ["favouriteVenues", "films", "people", "seen", "watchlist"],
     ]);
+  });
+
+  it("shows every section of a profile made public before they could be chosen", async () => {
+    serve({ store: publicReader("film-fan") });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.sections).toEqual({
+      watchlist: true,
+      seen: true,
+      seenStats: true,
+      favouriteVenues: true,
+    });
   });
 
   it("sends every film, however long the list", async () => {
@@ -197,6 +208,138 @@ describe("a public profile", () => {
   it("answers HEAD as GET", async () => {
     serve({ store: publicReader("film-fan") });
     expect((await get("/u/film-fan/", { method: "HEAD" })).status).toBe(200);
+  });
+});
+
+describe("the sections shown", () => {
+  const everything = {
+    seen: { "101": { title: "Seen", addedAt: 1 } },
+    watchlist: { "201": { title: "Wanted", addedAt: 2 } },
+    favouriteVenues: { "venue-1": { name: "The Rio", addedAt: 1 } },
+  };
+  const details = {
+    films: { "101": { genres: ["18"], directors: [], cast: [] } },
+    people: {},
+  };
+  const all = {
+    watchlist: true,
+    seen: true,
+    seenStats: true,
+    favouriteVenues: true,
+  };
+
+  function reader(sections: Record<string, unknown>) {
+    const store = publicReader("film-fan", "uid1", everything);
+    return {
+      ...store,
+      "users/uid1/meta/profile": {
+        handle: "film-fan",
+        public: true,
+        sections,
+      },
+      "users/uid1/meta/films": details,
+    };
+  }
+
+  /** The third request: what was asked for, of which documents. */
+  function listsRequest() {
+    const request = firestoreRequests().filter(({ url }) =>
+      url.endsWith(":batchGet"),
+    )[1];
+    if (!request) return undefined;
+    const { documents, mask } = JSON.parse(request.body!);
+    return {
+      documents: (documents as string[]).map((name) =>
+        name.split("/").slice(-2).join("/"),
+      ),
+      fields: (mask.fieldPaths as string[]).sort(),
+    };
+  }
+
+  it("asks for nothing a hidden section needs", async () => {
+    serve({
+      store: reader({ ...all, watchlist: false, favouriteVenues: false }),
+    });
+    const { data, html } = await readProfileData(await get("/u/film-fan/"));
+    expect(listsRequest()).toEqual({
+      documents: ["users/uid1", "meta/films"],
+      fields: ["films", "people", "seen"],
+    });
+    expect(data.sections).toEqual({
+      ...all,
+      watchlist: false,
+      favouriteVenues: false,
+    });
+    expect(html).not.toContain("Wanted");
+    expect(html).not.toContain("The Rio");
+  });
+
+  it("sends the Seen list for the stats while the list itself is hidden", async () => {
+    serve({ store: reader({ ...all, seen: false }) });
+    await get("/u/film-fan/");
+    expect(listsRequest()).toEqual({
+      documents: ["users/uid1", "meta/films"],
+      fields: ["favouriteVenues", "films", "people", "seen", "watchlist"],
+    });
+  });
+
+  it("leaves the film details out without the stats", async () => {
+    serve({ store: reader({ ...all, seenStats: false }) });
+    await get("/u/film-fan/");
+    expect(listsRequest()).toEqual({
+      documents: ["users/uid1"],
+      fields: ["favouriteVenues", "seen", "watchlist"],
+    });
+  });
+
+  it("reads no lists at all with every section hidden", async () => {
+    serve({
+      store: reader({
+        watchlist: false,
+        seen: false,
+        seenStats: false,
+        favouriteVenues: false,
+      }),
+    });
+    const response = await get("/u/film-fan/");
+    expect(response.status).toBe(200);
+    const { data } = await readProfileData(response);
+    expect(listsRequest()).toBeUndefined();
+    expect(data.documents).toEqual([]);
+  });
+
+  it("hides a section the map leaves out, or doesn't set to true", async () => {
+    serve({ store: reader({ watchlist: true, seen: "yes" }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.sections).toEqual({
+      watchlist: true,
+      seen: false,
+      seenStats: false,
+      favouriteVenues: false,
+    });
+    expect(listsRequest()?.fields).toEqual(["watchlist"]);
+  });
+
+  it.each([
+    [{ ...all, watchlist: false }, "The films film-fan has seen,"],
+    [
+      { ...all, seen: false, seenStats: false },
+      "The films film-fan wants to see,",
+    ],
+    [{ ...all, watchlist: false, seen: false }, "The films film-fan has seen,"],
+    [
+      {
+        watchlist: false,
+        seen: false,
+        seenStats: false,
+        favouriteVenues: true,
+      },
+      "film-fan's profile,",
+    ],
+  ])("is described by what it shows (%o)", async (sections, description) => {
+    serve({ store: reader(sections) });
+    const { html } = await readProfileData(await get("/u/film-fan/"));
+    expect(html).toContain(`<meta name="description" content="${description}`);
   });
 });
 

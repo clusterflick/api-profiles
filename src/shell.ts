@@ -1,4 +1,4 @@
-import type { ProfileData } from "./profile";
+import type { ProfileData, Sections } from "./profile";
 
 /**
  * The site's `/profile-shell/` page: its layout, built with each deploy's
@@ -26,9 +26,24 @@ export const SHELL_DESCRIPTION = "No public profile at this address.";
  */
 export function toScriptJson(data: ProfileData) {
   const json = data.found
-    ? `{"found":true,"handle":${JSON.stringify(data.handle)},"documents":${data.documents}}`
+    ? `{"found":true,"handle":${JSON.stringify(data.handle)},"sections":${JSON.stringify(data.sections)},"documents":${data.documents}}`
     : JSON.stringify(data);
   return json.replace(/</g, "\\u003c");
+}
+
+/**
+ * What the profile is said to hold, by the sections shown, so a description
+ * never promises a list the page leaves out. The stats count as what the
+ * reader has seen, being drawn from it.
+ */
+function describeContents(handle: string, sections: Sections) {
+  const seen = sections.seen || sections.seenStats;
+  if (seen && sections.watchlist) {
+    return `The films ${handle} has seen and wants to see`;
+  }
+  if (seen) return `The films ${handle} has seen`;
+  if (sections.watchlist) return `The films ${handle} wants to see`;
+  return `${handle}'s profile`;
 }
 
 /**
@@ -37,10 +52,14 @@ export function toScriptJson(data: ProfileData) {
  * text, or inside the RSC payload's JSON strings. No counts: the Worker
  * doesn't decode the lists, which is where they'd come from.
  */
-export function describeProfile(handle: string, origin: string) {
+export function describeProfile(
+  handle: string,
+  sections: Sections,
+  origin: string,
+) {
   return {
     title: `${handle}'s films`,
-    description: `The films ${handle} has seen and wants to see, on Clusterflick: every film showing in London.`,
+    description: `${describeContents(handle, sections)}, on Clusterflick: every film showing in London.`,
     url: `${origin}/u/${handle}/`,
   };
 }
@@ -71,7 +90,11 @@ export async function fillShell(
   let rewriter = new HTMLRewriter();
 
   if (data.found) {
-    const { title, description, url } = describeProfile(data.handle, origin);
+    const { title, description, url } = describeProfile(
+      data.handle,
+      data.sections,
+      origin,
+    );
     if (!html.includes(SHELL_TITLE) || !html.includes(SHELL_DESCRIPTION)) {
       // The page still works; its title and description are the shell's.
       console.error("The shell's title or description has changed");

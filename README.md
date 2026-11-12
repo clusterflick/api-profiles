@@ -48,12 +48,37 @@ a profile off takes effect on the next request.
 Three requests to Firestore's REST API, as a service account:
 
 1. `handles/{handle}`, which holds the owner's uid.
-2. A `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`) and
-   `users/{uid}/meta/capabilities` (`publicProfile`).
+2. A `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`,
+   `sections`) and `users/{uid}/meta/capabilities` (`publicProfile`).
 3. Only if the profile is to be shown, a `batchGet` of `users/{uid}` (`seen`,
    `watchlist`, `favouriteVenues`) and `users/{uid}/meta/films` (`films`,
-   `people`: each film's details, for the Seen stats). A field mask keeps out
-   anything else in them.
+   `people`: each film's details, for the Seen stats), for the sections the
+   reader shows. A field mask keeps out anything else in them.
+
+### Sections
+
+`sections` is the reader's choice of what the page shows: `watchlist`, `seen`,
+`seenStats` and `favouriteVenues`, each a boolean. A hidden section's fields
+are left out of the mask, so they're never fetched and never sent: the page
+draws only what it's given, but anything sent can be read from its source.
+
+| Shown             | Fields                                          |
+| ----------------- | ----------------------------------------------- |
+| `seen`            | `seen`                                          |
+| `seenStats`       | `seen`, and `films` and `people` (`meta/films`) |
+| `watchlist`       | `watchlist`                                     |
+| `favouriteVenues` | `favouriteVenues`                               |
+
+The stats are drawn in the browser from the Seen list and the film details,
+so showing them sends the Seen list even while the list itself is hidden. The
+site says so beside the switches. `meta/films` is only asked for with the
+stats, and with every section hidden the third request isn't made at all.
+
+A profile with no `sections` was made public before readers could choose,
+when every section was shown, and still shows them all; the site's rules now
+refuse `public: true` without `sections`, so no profile becomes public that
+way again. Within a `sections` map anything but `true` is hidden, since the
+rules require all four booleans and anything else is a hand edit.
 
 A profile is shown only when all of these hold:
 
@@ -71,6 +96,7 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
 {
   "found": true,
   "handle": "film-fan",
+  "sections": { "watchlist": true, "seen": true, "seenStats": true, "favouriteVenues": false },
   "documents": [
     { "found": { "name": "projects/…/documents/users/-", "fields": { "seen": { "mapValue": { … } } } } },
     { "missing": "projects/…/documents/users/-/meta/films" }
@@ -80,8 +106,9 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
 
 `documents` is the third request's answer as Firestore sent it, undecoded, with
 the uid in each name replaced by `-`. The page decodes it and draws the profile
-as `/personalise` draws the owner's own: every film on both lists, the Seen
-stats and the favourite venues. Never the uid, the email address, or any field
+as `/personalise` draws the owner's own, with only the sections shown. It
+needs `sections` to tell a hidden list from an empty one, since both arrive as
+a field that isn't there. Never the uid, the email address, or any field
 outside the mask. A not-found page gets `{ "found": false, "handle": "…" }`;
 the handle is there only when the path held a valid one, so the page can tell
 its owner why their profile isn't showing.
@@ -89,7 +116,9 @@ its owner why their profile isn't showing.
 For a public profile the Worker also describes it in the `<head>`: the title
 and description, the Open Graph and Twitter tags, a canonical link to
 `/u/<handle>/`, and `robots` of `index, follow`. Making a profile public is the
-consent to its being found. It is never in the sitemap. A not-found page gets
+consent to its being found. The description names only what the page shows
+("The films film-fan has seen", with the watchlist hidden). It is never in
+the sitemap. A not-found page gets
 `noindex`, and keeps the shell's generic title.
 
 Next renders the `<head>` again in the browser from the page's inline RSC

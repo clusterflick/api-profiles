@@ -12,6 +12,7 @@
  *   npm run bench:cpu
  */
 import { toScriptJson } from "../src/shell";
+import { readSections } from "../src/profile";
 import { encodeValue } from "../test/helpers";
 
 const UID = "Xy7kQ2mN9pLrT4vB8cD1eF3gH5jK";
@@ -78,6 +79,7 @@ for (const seen of [2000, 10000]) {
     toScriptJson({
       found: true,
       handle: "film-fan",
+      sections: readSections(undefined),
       documents: text.replaceAll(UID, "-"),
     });
     runs.push(performance.now() - start);
