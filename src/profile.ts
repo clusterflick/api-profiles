@@ -98,7 +98,8 @@ export function readDisplayName(value: Value | undefined): string | undefined {
 export type Links = Partial<Record<"letterboxd" | "imdb" | "website", string>>;
 
 const LINK_PATTERNS = {
-  letterboxd: /^[A-Za-z0-9_-]{1,50}$/,
+  // Letters, numbers and underscores, as Letterboxd allows: no hyphens.
+  letterboxd: /^[A-Za-z0-9_]{1,50}$/,
   imdb: /^ur[0-9]{1,12}$/,
   website: /^https:\/\/[^\s<>"\\]{1,192}$/,
 } as const;

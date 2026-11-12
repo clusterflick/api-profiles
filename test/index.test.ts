@@ -445,7 +445,7 @@ describe("the name and links", () => {
     serve({
       store: reader({
         links: {
-          letterboxd: "film_fan/../x",
+          letterboxd: "film-fan",
           imdb: "ur99",
           website: "javascript:alert(1)",
           twitter: "film_fan",
