@@ -1,4 +1,4 @@
-import type { ProfileData } from "./profile";
+import type { ProfileData, Sections } from "./profile";
 
 /**
  * The site's `/profile-shell/` page: its layout, built with each deploy's
@@ -26,24 +26,83 @@ export const SHELL_DESCRIPTION = "No public profile at this address.";
  */
 export function toScriptJson(data: ProfileData) {
   const json = data.found
-    ? `{"found":true,"handle":${JSON.stringify(data.handle)},"documents":${data.documents}}`
+    ? `{"found":true,"handle":${JSON.stringify(data.handle)},${
+        data.displayName === undefined
+          ? ""
+          : `"displayName":${JSON.stringify(data.displayName)},`
+      }"links":${JSON.stringify(data.links)},"favourites":${JSON.stringify(data.favourites)},"sections":${JSON.stringify(data.sections)},"documents":${data.documents}}`
     : JSON.stringify(data);
   return json.replace(/</g, "\\u003c");
 }
 
 /**
- * What the `<head>` says about a found profile. Made only of the handle
- * (`[a-z0-9_-]`) and fixed words, so it needs no escaping in an attribute, in
- * text, or inside the RSC payload's JSON strings. No counts: the Worker
- * doesn't decode the lists, which is where they'd come from.
+ * What the profile is said to hold, by the sections shown, so a description
+ * never promises a list the page leaves out. The stats count as what the
+ * reader has seen, being drawn from it.
  */
-export function describeProfile(handle: string, origin: string) {
+function describeContents(who: string, sections: Sections) {
+  const seen = sections.seen || sections.seenStats;
+  if (seen && sections.watchlist) {
+    return `The films ${who} has seen and wants to see`;
+  }
+  if (seen) return `The films ${who} has seen`;
+  if (sections.watchlist) return `The films ${who} wants to see`;
+  return `${who}'s profile`;
+}
+
+/**
+ * What the `<head>` says about a found profile. Made of the handle
+ * (`[a-z0-9_-]`), the display name (stripped of everything HTML and JSON give
+ * meaning to, and of a leading `$`, by `readDisplayName`) and fixed words, so
+ * it needs no escaping in an attribute, in text, or inside the RSC payload's
+ * JSON strings. With a name, the handle is beside it, so the address is never
+ * hidden behind a name anyone could choose. No counts: the Worker doesn't
+ * decode the lists, which is where they'd come from.
+ */
+export function describeProfile(
+  handle: string,
+  displayName: string | undefined,
+  sections: Sections,
+  origin: string,
+) {
   return {
-    title: `${handle}'s films`,
-    description: `The films ${handle} has seen and wants to see, on Clusterflick: every film showing in London.`,
+    title: displayName ? `${displayName} (@${handle})` : `${handle}'s films`,
+    description: `${describeContents(
+      displayName ? `${displayName} (@${handle})` : handle,
+      sections,
+    )}, on Clusterflick: every film showing in London.`,
     url: `${origin}/u/${handle}/`,
   };
 }
+
+/** The image size the poster is linked at: TMDB's, 500px wide. */
+const POSTER_SIZE = "w500";
+
+/**
+ * What a link to the profile previews with: the poster of the reader's
+ * first favourite that has one, rather than the site's own image. Only ever
+ * a TMDB image, at a path `readFavourites` has already checked, so nothing a
+ * reader uploads is ever shown under the site's name. The alt text is made of
+ * the name and handle, already safe here, and never the film's title, the
+ * one thing a reader types that isn't stripped. Undefined without a poster,
+ * leaving the site's image.
+ */
+export function describeProfileImage(
+  data: Extract<ProfileData, { found: true }>,
+) {
+  const favourite = data.favourites.find((film) => film.posterPath);
+  if (!favourite?.posterPath) return undefined;
+  return {
+    url: `https://image.tmdb.org/t/p/${POSTER_SIZE}${favourite.posterPath}`,
+    alt: `${data.displayName ?? data.handle}'s favourite film`,
+  };
+}
+
+const remove = {
+  element(element: Element) {
+    element.remove();
+  },
+};
 
 function setAttribute(name: string, value: string) {
   return {
@@ -71,7 +130,12 @@ export async function fillShell(
   let rewriter = new HTMLRewriter();
 
   if (data.found) {
-    const { title, description, url } = describeProfile(data.handle, origin);
+    const { title, description, url } = describeProfile(
+      data.handle,
+      data.displayName,
+      data.sections,
+      origin,
+    );
     if (!html.includes(SHELL_TITLE) || !html.includes(SHELL_DESCRIPTION)) {
       // The page still works; its title and description are the shell's.
       console.error("The shell's title or description has changed");
@@ -94,6 +158,21 @@ export async function fillShell(
         'meta[name="twitter:description"]',
         setAttribute("content", description),
       );
+
+    const image = describeProfileImage(data);
+    if (image) {
+      rewriter = rewriter
+        .on('meta[property="og:image"]', setAttribute("content", image.url))
+        .on('meta[property="og:image:alt"]', setAttribute("content", image.alt))
+        // The shell's are the site image's; a poster's are its own, and
+        // TMDB's aren't all exactly 2:3, so none rather than wrong ones.
+        .on('meta[property="og:image:width"]', remove)
+        .on('meta[property="og:image:height"]', remove)
+        .on('meta[name="twitter:image"]', setAttribute("content", image.url))
+        // A portrait poster as a thumbnail beside the text, rather than
+        // cropped into the wide banner `summary_large_image` draws.
+        .on('meta[name="twitter:card"]', setAttribute("content", "summary"));
+    }
   } else {
     head += `<meta name="robots" content="noindex"/>`;
   }

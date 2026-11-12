@@ -28,6 +28,12 @@ export const SHELL_HTML = `<!DOCTYPE html><html lang="en"><head>
 <meta property="og:title" content="Clusterflick – Every film showing in London"/>
 <meta property="og:description" content="Every film showing in London"/>
 <meta property="og:url" content="https://clusterflick.com/"/>
+<meta property="og:image" content="https://clusterflick.com/images/og-image.png"/>
+<meta property="og:image:width" content="1200"/>
+<meta property="og:image:height" content="630"/>
+<meta property="og:image:alt" content="Clusterflick"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:image" content="https://clusterflick.com/images/og-image.png"/>
 <meta name="twitter:title" content="Clusterflick – Every film showing in London"/>
 <meta name="twitter:description" content="Every film showing in London"/>
 </head><body><main id="profile"></main>

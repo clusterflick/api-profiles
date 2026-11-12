@@ -48,12 +48,38 @@ a profile off takes effect on the next request.
 Three requests to Firestore's REST API, as a service account:
 
 1. `handles/{handle}`, which holds the owner's uid.
-2. A `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`) and
+2. A `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`,
+   `sections`, `displayName`, `links`, `favourites`) and
    `users/{uid}/meta/capabilities` (`publicProfile`).
 3. Only if the profile is to be shown, a `batchGet` of `users/{uid}` (`seen`,
    `watchlist`, `favouriteVenues`) and `users/{uid}/meta/films` (`films`,
-   `people`: each film's details, for the Seen stats). A field mask keeps out
-   anything else in them.
+   `people`: each film's details, for the Seen stats), for the sections the
+   reader shows. A field mask keeps out anything else in them.
+
+### Sections
+
+`sections` is the reader's choice of what the page shows: `watchlist`, `seen`,
+`seenStats` and `favouriteVenues`, each a boolean. A hidden section's fields
+are left out of the mask, so they're never fetched and never sent: the page
+draws only what it's given, but anything sent can be read from its source.
+
+| Shown             | Fields                                          |
+| ----------------- | ----------------------------------------------- |
+| `seen`            | `seen`                                          |
+| `seenStats`       | `seen`, and `films` and `people` (`meta/films`) |
+| `watchlist`       | `watchlist`                                     |
+| `favouriteVenues` | `favouriteVenues`                               |
+
+The stats are drawn in the browser from the Seen list and the film details,
+so showing them sends the Seen list even while the list itself is hidden. The
+site says so beside the switches. `meta/films` is only asked for with the
+stats, and with every section hidden the third request isn't made at all.
+
+A profile with no `sections` was made public before readers could choose,
+when every section was shown, and still shows them all; the site's rules now
+refuse `public: true` without `sections`, so no profile becomes public that
+way again. Within a `sections` map anything but `true` is hidden, since the
+rules require all four booleans and anything else is a hand edit.
 
 A profile is shown only when all of these hold:
 
@@ -61,6 +87,41 @@ A profile is shown only when all of these hold:
   SDK skips the rules, so a hand edit could leave a stale handle behind)
 - the profile is `public`
 - the reader has the `publicProfile` capability
+
+### Name and links
+
+`displayName` is shown in place of the handle, and `links` are the reader's
+Letterboxd username, IMDb user id (`ur…`) and an https website. The site's
+rules refuse anything else, but the Admin SDK skips the rules, so both are
+checked again as they're read:
+
+- **The name is stripped, not escaped.** `"` `&` `<` `>` `\`, control
+  characters, the line and paragraph separators, and the bidirectional
+  embeddings, overrides and isolates are taken out, spaces collapsed, and a
+  leading `$` dropped. What's left is plain text in the `<title>`, in an
+  attribute, and inside the RSC payload, where it sits in a JSON string inside
+  a JavaScript string and a string starting with `$` would be read as a
+  reference. An apostrophe is kept (O'Brien): nothing it's written into is
+  quoted with one. Too long (over 50 characters) or empty is no name.
+- **A link that doesn't match its pattern is dropped**, and the others kept.
+  The page builds each address from the identifier, so nothing a reader
+  types becomes a link anywhere but their website.
+
+The site keeps the same lists (`FORBIDDEN_NAME_RANGES` and the link patterns
+in `src/lib/user-profile/identity.ts`, and `firestore.rules`): change them
+together.
+
+### Favourite films
+
+`favourites` is up to four films the reader pins to the top of their profile,
+in their order, each its own snapshot (`id`, `title`, and a `year` and
+`posterPath` if it has them) rather than a reference into the Seen list. So
+they're sent whether the Seen list is shown or not, and a hidden Seen list
+stays wholly hidden: nothing is pulled out of it. They're checked again as
+they're read, as the site's rules check them: a film whose id or title
+doesn't fit is dropped, a year or poster that doesn't fit is left off, a
+repeat is kept once, and nothing past four is sent. The title is drawn by the
+page and never written into the `<head>`, so it needs no stripping.
 
 ## What it sends
 
@@ -71,6 +132,10 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
 {
   "found": true,
   "handle": "film-fan",
+  "displayName": "Siobhán O'Brien",
+  "links": { "letterboxd": "film_fan", "imdb": "ur1234567" },
+  "favourites": [{ "id": "949", "title": "Heat", "year": "1995", "posterPath": "/heat.jpg" }],
+  "sections": { "watchlist": true, "seen": true, "seenStats": true, "favouriteVenues": false },
   "documents": [
     { "found": { "name": "projects/…/documents/users/-", "fields": { "seen": { "mapValue": { … } } } } },
     { "missing": "projects/…/documents/users/-/meta/films" }
@@ -80,8 +145,9 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
 
 `documents` is the third request's answer as Firestore sent it, undecoded, with
 the uid in each name replaced by `-`. The page decodes it and draws the profile
-as `/personalise` draws the owner's own: every film on both lists, the Seen
-stats and the favourite venues. Never the uid, the email address, or any field
+as `/personalise` draws the owner's own, with only the sections shown. It
+needs `sections` to tell a hidden list from an empty one, since both arrive as
+a field that isn't there. Never the uid, the email address, or any field
 outside the mask. A not-found page gets `{ "found": false, "handle": "…" }`;
 the handle is there only when the path held a valid one, so the page can tell
 its owner why their profile isn't showing.
@@ -89,7 +155,12 @@ its owner why their profile isn't showing.
 For a public profile the Worker also describes it in the `<head>`: the title
 and description, the Open Graph and Twitter tags, a canonical link to
 `/u/<handle>/`, and `robots` of `index, follow`. Making a profile public is the
-consent to its being found. It is never in the sitemap. A not-found page gets
+consent to its being found. With a display name the title is the name beside
+the handle ("Siobhán O'Brien (@film-fan)"), so the address is never hidden
+behind a name anyone could choose; without one, "film-fan's films". The
+description names only what the page shows ("The films film-fan has seen",
+with the watchlist hidden). It is never in
+the sitemap. A not-found page gets
 `noindex`, and keeps the shell's generic title.
 
 Next renders the `<head>` again in the browser from the page's inline RSC
@@ -100,6 +171,17 @@ everywhere in the page, the payload included. They must match the site's
 `PROFILE_SHELL_TITLE` and `PROFILE_SHELL_DESCRIPTION`; if they don't, the
 Worker logs an error and the page keeps the shell's. The Open Graph and Twitter
 tags are only rewritten in the HTML as sent, which is what link previews read.
+
+A link to a profile previews with the poster of its first favourite that has
+one, in place of the site's image: `og:image` and `twitter:image` become the
+TMDB poster at 500px wide, `twitter:card` becomes `summary` (a portrait
+poster beside the text rather than cropped into a wide banner), the site
+image's `og:image:width` and `og:image:height` are removed rather than left
+wrong, and the alt text is "<name>'s favourite film", made of the stripped
+name or the handle and never the film's title. It's only ever a TMDB image at
+a path `readFavourites` has checked, so nothing a reader uploads is shown
+under the site's name. Without a poster among the favourites, the preview is
+the site's.
 
 ## CPU
 

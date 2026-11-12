@@ -152,9 +152,28 @@ describe("a public profile", () => {
       .filter(({ url }) => url.endsWith(":batchGet"))
       .map(({ body }) => JSON.parse(body!).mask.fieldPaths.sort());
     expect(masks).toEqual([
-      ["handle", "public", "publicProfile"],
+      [
+        "displayName",
+        "favourites",
+        "handle",
+        "links",
+        "public",
+        "publicProfile",
+        "sections",
+      ],
       ["favouriteVenues", "films", "people", "seen", "watchlist"],
     ]);
+  });
+
+  it("shows every section of a profile made public before they could be chosen", async () => {
+    serve({ store: publicReader("film-fan") });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.sections).toEqual({
+      watchlist: true,
+      seen: true,
+      seenStats: true,
+      favouriteVenues: true,
+    });
   });
 
   it("sends every film, however long the list", async () => {
@@ -197,6 +216,364 @@ describe("a public profile", () => {
   it("answers HEAD as GET", async () => {
     serve({ store: publicReader("film-fan") });
     expect((await get("/u/film-fan/", { method: "HEAD" })).status).toBe(200);
+  });
+});
+
+describe("the sections shown", () => {
+  const everything = {
+    seen: { "101": { title: "Seen", addedAt: 1 } },
+    watchlist: { "201": { title: "Wanted", addedAt: 2 } },
+    favouriteVenues: { "venue-1": { name: "The Rio", addedAt: 1 } },
+  };
+  const details = {
+    films: { "101": { genres: ["18"], directors: [], cast: [] } },
+    people: {},
+  };
+  const all = {
+    watchlist: true,
+    seen: true,
+    seenStats: true,
+    favouriteVenues: true,
+  };
+
+  function reader(sections: Record<string, unknown>) {
+    const store = publicReader("film-fan", "uid1", everything);
+    return {
+      ...store,
+      "users/uid1/meta/profile": {
+        handle: "film-fan",
+        public: true,
+        sections,
+      },
+      "users/uid1/meta/films": details,
+    };
+  }
+
+  /** The third request: what was asked for, of which documents. */
+  function listsRequest() {
+    const request = firestoreRequests().filter(({ url }) =>
+      url.endsWith(":batchGet"),
+    )[1];
+    if (!request) return undefined;
+    const { documents, mask } = JSON.parse(request.body!);
+    return {
+      documents: (documents as string[]).map((name) =>
+        name.split("/").slice(-2).join("/"),
+      ),
+      fields: (mask.fieldPaths as string[]).sort(),
+    };
+  }
+
+  it("asks for nothing a hidden section needs", async () => {
+    serve({
+      store: reader({ ...all, watchlist: false, favouriteVenues: false }),
+    });
+    const { data, html } = await readProfileData(await get("/u/film-fan/"));
+    expect(listsRequest()).toEqual({
+      documents: ["users/uid1", "meta/films"],
+      fields: ["films", "people", "seen"],
+    });
+    expect(data.sections).toEqual({
+      ...all,
+      watchlist: false,
+      favouriteVenues: false,
+    });
+    expect(html).not.toContain("Wanted");
+    expect(html).not.toContain("The Rio");
+  });
+
+  it("sends the Seen list for the stats while the list itself is hidden", async () => {
+    serve({ store: reader({ ...all, seen: false }) });
+    await get("/u/film-fan/");
+    expect(listsRequest()).toEqual({
+      documents: ["users/uid1", "meta/films"],
+      fields: ["favouriteVenues", "films", "people", "seen", "watchlist"],
+    });
+  });
+
+  it("leaves the film details out without the stats", async () => {
+    serve({ store: reader({ ...all, seenStats: false }) });
+    await get("/u/film-fan/");
+    expect(listsRequest()).toEqual({
+      documents: ["users/uid1"],
+      fields: ["favouriteVenues", "seen", "watchlist"],
+    });
+  });
+
+  it("reads no lists at all with every section hidden", async () => {
+    serve({
+      store: reader({
+        watchlist: false,
+        seen: false,
+        seenStats: false,
+        favouriteVenues: false,
+      }),
+    });
+    const response = await get("/u/film-fan/");
+    expect(response.status).toBe(200);
+    const { data } = await readProfileData(response);
+    expect(listsRequest()).toBeUndefined();
+    expect(data.documents).toEqual([]);
+  });
+
+  it("hides a section the map leaves out, or doesn't set to true", async () => {
+    serve({ store: reader({ watchlist: true, seen: "yes" }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.sections).toEqual({
+      watchlist: true,
+      seen: false,
+      seenStats: false,
+      favouriteVenues: false,
+    });
+    expect(listsRequest()?.fields).toEqual(["watchlist"]);
+  });
+
+  it.each([
+    [{ ...all, watchlist: false }, "The films film-fan has seen,"],
+    [
+      { ...all, seen: false, seenStats: false },
+      "The films film-fan wants to see,",
+    ],
+    [{ ...all, watchlist: false, seen: false }, "The films film-fan has seen,"],
+    [
+      {
+        watchlist: false,
+        seen: false,
+        seenStats: false,
+        favouriteVenues: true,
+      },
+      "film-fan's profile,",
+    ],
+  ])("is described by what it shows (%o)", async (sections, description) => {
+    serve({ store: reader(sections) });
+    const { html } = await readProfileData(await get("/u/film-fan/"));
+    expect(html).toContain(`<meta name="description" content="${description}`);
+  });
+});
+
+describe("the name and links", () => {
+  function reader(profile: Record<string, unknown>) {
+    const store = publicReader("film-fan");
+    return {
+      ...store,
+      "users/uid1/meta/profile": {
+        handle: "film-fan",
+        public: true,
+        ...profile,
+      },
+    };
+  }
+
+  /**
+   * The RSC payload's strings, read as the browser would: the script's
+   * argument as JavaScript, then the string inside it as JSON. Throws if the
+   * name broke either.
+   */
+  function readPayload(html: string) {
+    const script = html.match(/self\.__next_f\.push\((.*?)\)<\/script>/s)?.[1];
+    if (!script) throw new Error("No payload");
+    const [, text] = JSON.parse(script) as [number, string];
+    return JSON.parse(text) as [
+      string,
+      string,
+      string,
+      Record<string, string>,
+    ][];
+  }
+
+  it("sends them, and the head is the name beside the handle", async () => {
+    serve({
+      store: reader({
+        displayName: "Siobhán O'Brien",
+        links: { letterboxd: "film_fan", imdb: "ur1234567" },
+      }),
+    });
+    const { html, data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.displayName).toBe("Siobhán O'Brien");
+    expect(data.links).toEqual({ letterboxd: "film_fan", imdb: "ur1234567" });
+    const title = "Siobhán O'Brien (@film-fan)";
+    expect(html).toContain(`<title>${title} | Clusterflick</title>`);
+    expect(html).toContain(`<meta property="og:title" content="${title}"`);
+    expect(html).toContain(
+      `The films ${title} has seen and wants to see, on Clusterflick`,
+    );
+    const [titleTag, description] = readPayload(html);
+    expect(titleTag[3].children).toBe(`${title} | Clusterflick`);
+    expect(description[3].content).toMatch(/^The films Siobhán O'Brien/);
+  });
+
+  it("strips a name that would break the page, and it stays plain text everywhere", async () => {
+    serve({
+      store: reader({
+        displayName: '$"><script>alert(1)</script>\\ & \u2028x\u202Ey',
+      }),
+    });
+    const { html, data } = await readProfileData(await get("/u/film-fan/"));
+    const name = "scriptalert(1)/script xy";
+    expect(data.displayName).toBe(name);
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain(`<title>${name} (@film-fan) | Clusterflick</title>`);
+    expect(html).toContain(
+      `<meta property="og:title" content="${name} (@film-fan)"`,
+    );
+    expect(readPayload(html)[0][3].children).toBe(
+      `${name} (@film-fan) | Clusterflick`,
+    );
+  });
+
+  it("drops a leading $, which the payload would read as a reference", async () => {
+    serve({ store: reader({ displayName: "$$ Money" }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.displayName).toBe("Money");
+  });
+
+  it.each([
+    ["too long", "é".repeat(51)],
+    ["nothing left once stripped", "<<>>"],
+    ["not a string", 42],
+  ])(
+    "a name %s is no name, and the head is the handle's",
+    async (_, displayName) => {
+      serve({ store: reader({ displayName }) });
+      const { html, data } = await readProfileData(await get("/u/film-fan/"));
+      expect(data).not.toHaveProperty("displayName");
+      expect(html).toContain("<title>film-fan's films | Clusterflick</title>");
+    },
+  );
+
+  it("drops links it can't show", async () => {
+    serve({
+      store: reader({
+        links: {
+          letterboxd: "film-fan",
+          imdb: "ur99",
+          website: "javascript:alert(1)",
+          twitter: "film_fan",
+        },
+      }),
+    });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.links).toEqual({ imdb: "ur99" });
+  });
+
+  it("sends no links as none", async () => {
+    serve({ store: reader({}) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.links).toEqual({});
+  });
+});
+
+describe("favourite films", () => {
+  const film = (n: number) => ({
+    id: String(100 + n),
+    title: `Film ${n}`,
+    year: "2001",
+    posterPath: `/poster-${n}.jpg`,
+  });
+
+  function reader(profile: Record<string, unknown>) {
+    const store = publicReader("film-fan", "uid1", {
+      seen: { "101": { title: "Film 1", addedAt: 1 } },
+    });
+    return {
+      ...store,
+      "users/uid1/meta/profile": {
+        handle: "film-fan",
+        public: true,
+        sections: {
+          watchlist: true,
+          seen: false,
+          seenStats: false,
+          favouriteVenues: true,
+        },
+        ...profile,
+      },
+    };
+  }
+
+  it("are sent in order, from the profile, while the Seen list stays hidden", async () => {
+    serve({ store: reader({ favourites: [film(3), film(1)] }) });
+    const { data, html } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.favourites).toEqual([film(3), film(1)]);
+    // Nothing from the Seen list itself: it isn't asked for.
+    const listsMask = firestoreRequests()
+      .filter(({ url }) => url.endsWith(":batchGet"))
+      .map(({ body }) => JSON.parse(body!).mask.fieldPaths)[1];
+    expect(listsMask).not.toContain("seen");
+    expect(JSON.stringify(data.documents)).not.toContain('"seen"');
+    expect(html).toContain("Film 3");
+  });
+
+  it("drops what can't be drawn, repeats, and anything past four", async () => {
+    serve({
+      store: reader({
+        favourites: [
+          film(1),
+          { id: "../x", title: "Bad" },
+          { id: "102", title: "   " },
+          film(1),
+          { ...film(2), year: "c. 1920", posterPath: "https://x.y/p.jpg" },
+          film(3),
+          film(4),
+          film(5),
+        ],
+      }),
+    });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.favourites).toEqual([
+      film(1),
+      { id: "102", title: "Film 2" },
+      film(3),
+      film(4),
+    ]);
+  });
+
+  it("are none when there are none, or they aren't a list", async () => {
+    serve({ store: reader({ favourites: { 0: film(1) } }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.favourites).toEqual([]);
+  });
+
+  it("lend the first one with a poster to the link preview", async () => {
+    serve({
+      store: reader({
+        displayName: "Siobhán O'Brien",
+        favourites: [{ id: "100", title: "No Poster" }, film(2), film(3)],
+      }),
+    });
+    const { html } = await readProfileData(await get("/u/film-fan/"));
+    const poster = "https://image.tmdb.org/t/p/w500/poster-2.jpg";
+    expect(html).toContain(`<meta property="og:image" content="${poster}"`);
+    expect(html).toContain(`<meta name="twitter:image" content="${poster}"`);
+    expect(html).toContain('<meta name="twitter:card" content="summary"');
+    expect(html).toContain(
+      `<meta property="og:image:alt" content="Siobhán O'Brien's favourite film"`,
+    );
+    // The site image's size, which isn't the poster's.
+    expect(html).not.toContain("og:image:width");
+    expect(html).not.toContain("og:image:height");
+  });
+
+  it("leave the site's preview image without a poster among them", async () => {
+    serve({
+      store: reader({ favourites: [{ id: "100", title: "No Poster" }] }),
+    });
+    const { html } = await readProfileData(await get("/u/film-fan/"));
+    expect(html).toContain(
+      '<meta property="og:image" content="https://clusterflick.com/images/og-image.png"/>',
+    );
+    expect(html).toContain(
+      '<meta name="twitter:card" content="summary_large_image"/>',
+    );
+    expect(html).toContain('<meta property="og:image:width" content="1200"/>');
+  });
+
+  it("escapes a title that would close the script tag", async () => {
+    const title = "</script><script>alert(1)</script>";
+    serve({ store: reader({ favourites: [{ id: "101", title }] }) });
+    const { html, data } = await readProfileData(await get("/u/film-fan/"));
+    expect(html).not.toContain("<script>alert(1)");
+    expect(data.favourites).toEqual([{ id: "101", title }]);
   });
 });
 
