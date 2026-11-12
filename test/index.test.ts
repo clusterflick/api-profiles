@@ -3,7 +3,7 @@ import { jwtVerify } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessToken } from "../src/google-auth";
 import { handleRequest } from "../src/index";
-import { RECENT_FILMS } from "../src/profile";
+import { decodeFields, type Fields } from "../src/firestore";
 import {
   fakeUpstreams,
   publicReader,
@@ -66,13 +66,38 @@ describe("a public profile", () => {
     addedAt: 1_700_000_000_000 + n,
   });
 
+  /** The documents the page was sent, decoded, by the last part of their names. */
+  function readDocuments(documents: unknown) {
+    return Object.fromEntries(
+      (documents as { found?: { name: string; fields?: Fields } }[]).flatMap(
+        ({ found }) =>
+          found
+            ? [
+                [
+                  found.name.split("/").slice(-2).join("/"),
+                  decodeFields(found.fields),
+                ],
+              ]
+            : [],
+      ),
+    );
+  }
+
   it("is the shell, with the profile in it and its head describing it", async () => {
     serve({
-      store: publicReader("film-fan", "uid1", {
-        seen: { "101": film(1), "102": { title: "No Year", addedAt: 5 } },
-        watchlist: { "201": film(2) },
-        favouriteVenues: { "venue-1": { name: "The Rio", addedAt: 1 } },
-      }),
+      store: {
+        ...publicReader("film-fan", "uid1", {
+          seen: { "101": film(1), "102": { title: "No Year", addedAt: 5 } },
+          watchlist: { "201": film(2) },
+          favouriteVenues: { "venue-1": { name: "The Rio", addedAt: 1 } },
+        }),
+        "users/uid1/meta/films": {
+          films: {
+            "101": { genres: ["18"], directors: ["9"], cast: [], runtime: 101 },
+          },
+          people: { "9": "Agnès Varda" },
+        },
+      },
     });
     const response = await get("/u/film-fan/");
     expect(response.status).toBe(200);
@@ -80,31 +105,20 @@ describe("a public profile", () => {
     expect(response.headers.get("ETag")).toBeNull();
 
     const { html, data } = await readProfileData(response);
-    expect(data).toEqual({
-      found: true,
-      handle: "film-fan",
-      seen: {
-        count: 2,
-        films: [
-          {
-            id: "101",
-            title: "Film 1",
-            year: "2001",
-            posterPath: "/poster-1.jpg",
-          },
-          { id: "102", title: "No Year" },
-        ],
+    expect(data.found).toBe(true);
+    expect(data.handle).toBe("film-fan");
+    expect(readDocuments(data.documents)).toEqual({
+      // The uid is taken out of the names.
+      "users/-": {
+        seen: { "101": film(1), "102": { title: "No Year", addedAt: 5 } },
+        watchlist: { "201": film(2) },
+        favouriteVenues: { "venue-1": { name: "The Rio", addedAt: 1 } },
       },
-      watchlist: {
-        count: 1,
-        films: [
-          {
-            id: "201",
-            title: "Film 2",
-            year: "2001",
-            posterPath: "/poster-2.jpg",
-          },
-        ],
+      "meta/films": {
+        films: {
+          "101": { genres: ["18"], directors: ["9"], cast: [], runtime: 101 },
+        },
+        people: { "9": "Agnès Varda" },
       },
     });
     expect(html).toContain("<title>film-fan's films | Clusterflick</title>");
@@ -114,7 +128,6 @@ describe("a public profile", () => {
     expect(html).toContain(
       '\\"children\\":\\"film-fan\'s films | Clusterflick\\"',
     );
-    expect(html).toContain('<meta name="robots" content="index, follow"');
     expect(html).toContain(
       '<link rel="canonical" href="https://clusterflick.com/u/film-fan/"',
     );
@@ -124,37 +137,46 @@ describe("a public profile", () => {
     expect(html).toContain(
       '<meta property="og:title" content="film-fan\'s films"',
     );
-    expect(html).toContain(
-      "film-fan has seen 2 films and has 1 film on their watchlist",
-    );
+    expect(html).toContain("The films film-fan has seen and wants to see");
     expect(html.match(/<meta name="robots"[^>]*>/g)).toEqual([
       '<meta name="robots" content="index, follow"/>',
     ]);
     expect(html.match(/<link rel="canonical"[^>]*>/g)).toHaveLength(1);
     expect(html).not.toContain("uid1");
-    expect(html).not.toContain("The Rio");
   });
 
-  it("asks only for the fields it needs, never the reader's venues", async () => {
+  it("asks only for the published fields", async () => {
     serve({ store: publicReader("film-fan") });
     await get("/u/film-fan/");
-    const batch = firestoreRequests().find(({ url }) =>
-      url.endsWith(":batchGet"),
-    );
-    expect(JSON.parse(batch!.body!).mask.fieldPaths.sort()).toEqual(
-      ["handle", "public", "publicProfile", "seen", "watchlist"].sort(),
-    );
+    const masks = firestoreRequests()
+      .filter(({ url }) => url.endsWith(":batchGet"))
+      .map(({ body }) => JSON.parse(body!).mask.fieldPaths.sort());
+    expect(masks).toEqual([
+      ["handle", "public", "publicProfile"],
+      ["favouriteVenues", "films", "people", "seen", "watchlist"],
+    ]);
   });
 
-  it(`sends the ${RECENT_FILMS} most recently added of each list, and the count`, async () => {
+  it("sends every film, however long the list", async () => {
     const seen = Object.fromEntries(
-      Array.from({ length: 30 }, (_, n) => [String(n), film(n)]),
+      Array.from({ length: 3000 }, (_, n) => [String(n), film(n)]),
     );
     serve({ store: publicReader("film-fan", "uid1", { seen }) });
     const { data } = await readProfileData(await get("/u/film-fan/"));
-    expect(data.seen.count).toBe(30);
-    expect(data.seen.films.map(({ id }: { id: string }) => id)).toEqual(
-      Array.from({ length: RECENT_FILMS }, (_, n) => String(29 - n)),
+    expect(
+      Object.keys(readDocuments(data.documents)["users/-"].seen as object),
+    ).toHaveLength(3000);
+  });
+
+  it("sends a reader with no film details yet as missing, not as an error", async () => {
+    serve({ store: publicReader("film-fan") });
+    const response = await get("/u/film-fan/");
+    expect(response.status).toBe(200);
+    const { data } = await readProfileData(response);
+    expect(data.documents).toContainEqual(
+      expect.objectContaining({
+        missing: expect.stringMatching(/users\/-\/meta\/films$/),
+      }),
     );
   });
 
@@ -167,7 +189,9 @@ describe("a public profile", () => {
     });
     const { html, data } = await readProfileData(await get("/u/film-fan/"));
     expect(html).not.toContain("<script>alert(1)");
-    expect(data.seen.films[0].title).toBe(title);
+    expect(readDocuments(data.documents)["users/-"].seen).toEqual({
+      "1": { title, addedAt: 1 },
+    });
   });
 
   it("answers HEAD as GET", async () => {
@@ -221,6 +245,25 @@ describe("not found", () => {
       expect(html).toBe(unknown.html);
     },
   );
+
+  it("never fetches a private profile's lists", async () => {
+    serve({
+      store: {
+        ...reader,
+        "users/uid1/meta/profile": { handle: "film-fan", public: false },
+      },
+    });
+    await get("/u/film-fan/");
+    expect(
+      firestoreRequests().map(({ body }) => body && JSON.parse(body).documents),
+    ).toEqual([
+      undefined,
+      [
+        expect.stringMatching(/users\/uid1\/meta\/profile$/),
+        expect.stringMatching(/users\/uid1\/meta\/capabilities$/),
+      ],
+    ]);
+  });
 
   it("is noindex, with the shell's title and no canonical", async () => {
     serve({});

@@ -19,32 +19,30 @@ export const SHELL_TITLE = "Profile Not Found | Clusterflick";
 export const SHELL_DESCRIPTION = "No public profile at this address.";
 
 /**
- * As JSON in a script tag. `<` is escaped so a film title can never close the
- * tag; the browser's JSON.parse reads the escape back as `<`.
+ * As JSON in a script tag. A found profile's documents are spliced in as the
+ * text Firestore sent, already JSON, rather than parsed and serialised again.
+ * `<` is escaped so a film title can never close the tag; the browser's
+ * JSON.parse reads the escape back as `<`.
  */
 export function toScriptJson(data: ProfileData) {
-  return JSON.stringify(data).replace(/</g, "\\u003c");
-}
-
-function plural(count: number, one: string, many: string) {
-  return `${count.toLocaleString("en-GB")} ${count === 1 ? one : many}`;
+  const json = data.found
+    ? `{"found":true,"handle":${JSON.stringify(data.handle)},"documents":${data.documents}}`
+    : JSON.stringify(data);
+  return json.replace(/</g, "\\u003c");
 }
 
 /**
  * What the `<head>` says about a found profile. Made only of the handle
- * (`[a-z0-9_-]`), numbers and fixed words, so it needs no escaping in an
- * attribute, in text, or inside the RSC payload's JSON strings.
+ * (`[a-z0-9_-]`) and fixed words, so it needs no escaping in an attribute, in
+ * text, or inside the RSC payload's JSON strings. No counts: the Worker
+ * doesn't decode the lists, which is where they'd come from.
  */
-export function describeProfile(
-  data: Extract<ProfileData, { found: true }>,
-  origin: string,
-) {
-  const title = `${data.handle}'s films`;
-  const description =
-    `${data.handle} has seen ${plural(data.seen.count, "film", "films")} ` +
-    `and has ${plural(data.watchlist.count, "film", "films")} on their ` +
-    `watchlist, on Clusterflick: every film showing in London.`;
-  return { title, description, url: `${origin}/u/${data.handle}/` };
+export function describeProfile(handle: string, origin: string) {
+  return {
+    title: `${handle}'s films`,
+    description: `The films ${handle} has seen and wants to see, on Clusterflick: every film showing in London.`,
+    url: `${origin}/u/${handle}/`,
+  };
 }
 
 function setAttribute(name: string, value: string) {
@@ -73,7 +71,7 @@ export async function fillShell(
   let rewriter = new HTMLRewriter();
 
   if (data.found) {
-    const { title, description, url } = describeProfile(data, origin);
+    const { title, description, url } = describeProfile(data.handle, origin);
     if (!html.includes(SHELL_TITLE) || !html.includes(SHELL_DESCRIPTION)) {
       // The page still works; its title and description are the shell's.
       console.error("The shell's title or description has changed");

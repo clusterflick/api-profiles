@@ -73,17 +73,10 @@ export class Firestore {
   }
 
   /**
-   * Several documents in one request, by path, each null if it doesn't exist.
-   * Firestore takes one field mask for the whole batch, so `fields` is the
-   * union of what each document needs; a field one of them doesn't have is
-   * simply absent. The fields come back undecoded, so a caller can skip what
-   * it won't use: decoding a 2,000-film list whole costs more CPU than a
-   * Worker on the free plan has.
+   * `batchGet`'s answer as Firestore sent it, undecoded: a JSON array of
+   * `{ found: Document }` or `{ missing: name }`, in no particular order.
    */
-  async batchGet(
-    paths: string[],
-    fields: string[],
-  ): Promise<(Fields | null)[]> {
+  async batchGetText(paths: string[], fields: string[]): Promise<string> {
     const names = paths.map((path) => `${this.root}/${path}`);
     const response = await this.request(`${this.root}:batchGet`, {
       method: "POST",
@@ -94,8 +87,23 @@ export class Firestore {
         `Firestore batchGet failed: ${response.status} ${await response.text()}`,
       );
     }
+    return response.text();
+  }
+
+  /**
+   * Several documents in one request, by path, each null if it doesn't exist.
+   * Firestore takes one field mask for the whole batch, so `fields` is the
+   * union of what each document needs; a field one of them doesn't have is
+   * simply absent. The fields come back undecoded, for the caller to decode
+   * what it uses.
+   */
+  async batchGet(
+    paths: string[],
+    fields: string[],
+  ): Promise<(Fields | null)[]> {
+    const names = paths.map((path) => `${this.root}/${path}`);
     // In no particular order, so matched up by name.
-    const results = (await response.json()) as {
+    const results = JSON.parse(await this.batchGetText(paths, fields)) as {
       found?: Document;
       missing?: string;
     }[];

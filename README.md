@@ -45,13 +45,15 @@ a profile off takes effect on the next request.
 
 ## What it reads
 
-Two requests to Firestore's REST API, as a service account:
+Three requests to Firestore's REST API, as a service account:
 
 1. `handles/{handle}`, which holds the owner's uid.
-2. One `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`),
-   `users/{uid}/meta/capabilities` (`publicProfile`) and `users/{uid}` (`seen`,
-   `watchlist`), through a field mask, so the reader's other fields are never
-   fetched.
+2. A `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`) and
+   `users/{uid}/meta/capabilities` (`publicProfile`).
+3. Only if the profile is to be shown, a `batchGet` of `users/{uid}` (`seen`,
+   `watchlist`, `favouriteVenues`) and `users/{uid}/meta/films` (`films`,
+   `people`: each film's details, for the Seen stats). A field mask keeps out
+   anything else in them.
 
 A profile is shown only when all of these hold:
 
@@ -69,19 +71,18 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
 {
   "found": true,
   "handle": "film-fan",
-  "seen": {
-    "count": 412,
-    "films": [
-      { "id": "438631", "title": "Dune", "year": "2021", "posterPath": "/…" }
-    ]
-  },
-  "watchlist": { "count": 37, "films": [] }
+  "documents": [
+    { "found": { "name": "projects/…/documents/users/-", "fields": { "seen": { "mapValue": { … } } } } },
+    { "missing": "projects/…/documents/users/-/meta/films" }
+  ]
 }
 ```
 
-`films` is the 24 most recently added (`RECENT_FILMS`), each the list entry's
-own snapshot. Never the uid, the email address, or any field the reader didn't
-choose to publish. A not-found page gets `{ "found": false, "handle": "…" }`;
+`documents` is the third request's answer as Firestore sent it, undecoded, with
+the uid in each name replaced by `-`. The page decodes it and draws the profile
+as `/personalise` draws the owner's own: every film on both lists, the Seen
+stats and the favourite venues. Never the uid, the email address, or any field
+outside the mask. A not-found page gets `{ "found": false, "handle": "…" }`;
 the handle is there only when the path held a valid one, so the page can tell
 its owner why their profile isn't showing.
 
@@ -102,10 +103,16 @@ tags are only rewritten in the HTML as sent, which is what link previews read.
 
 ## CPU
 
-Workers Free allows 10ms of CPU a request. A field mask can't trim a map, so a
-reader's whole Seen list is parsed, though only the films sent are decoded.
-`npm run bench:cpu` times that for 2,000 films: about 3ms on a fresh isolate,
-2ms warm, on an M-series Mac. Workers Logs show the real figure per request.
+Workers Free allows 10ms of CPU a request. Firestore's REST format is two to
+three times the stored size, and decoding a long Seen list in it costs more
+than that, so the Worker decodes only the three small documents it checks.
+The lists and film details pass through as text: taking out the uid and
+escaping them is all it does to them. `npm run bench:cpu` times that: 0.3ms
+for 2,000 films with their details (1.6MB), 1.1ms for 10,000 (7.4MB), on an
+M-series Mac. Workers Logs show the real figure per request.
+
+On the Workers Paid plan, with CPU to spare, the Worker could decode them and
+send the page a smaller payload instead.
 
 ## Development
 
