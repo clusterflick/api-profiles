@@ -26,7 +26,11 @@ export const SHELL_DESCRIPTION = "No public profile at this address.";
  */
 export function toScriptJson(data: ProfileData) {
   const json = data.found
-    ? `{"found":true,"handle":${JSON.stringify(data.handle)},"sections":${JSON.stringify(data.sections)},"documents":${data.documents}}`
+    ? `{"found":true,"handle":${JSON.stringify(data.handle)},${
+        data.displayName === undefined
+          ? ""
+          : `"displayName":${JSON.stringify(data.displayName)},`
+      }"links":${JSON.stringify(data.links)},"sections":${JSON.stringify(data.sections)},"documents":${data.documents}}`
     : JSON.stringify(data);
   return json.replace(/</g, "\\u003c");
 }
@@ -36,30 +40,37 @@ export function toScriptJson(data: ProfileData) {
  * never promises a list the page leaves out. The stats count as what the
  * reader has seen, being drawn from it.
  */
-function describeContents(handle: string, sections: Sections) {
+function describeContents(who: string, sections: Sections) {
   const seen = sections.seen || sections.seenStats;
   if (seen && sections.watchlist) {
-    return `The films ${handle} has seen and wants to see`;
+    return `The films ${who} has seen and wants to see`;
   }
-  if (seen) return `The films ${handle} has seen`;
-  if (sections.watchlist) return `The films ${handle} wants to see`;
-  return `${handle}'s profile`;
+  if (seen) return `The films ${who} has seen`;
+  if (sections.watchlist) return `The films ${who} wants to see`;
+  return `${who}'s profile`;
 }
 
 /**
- * What the `<head>` says about a found profile. Made only of the handle
- * (`[a-z0-9_-]`) and fixed words, so it needs no escaping in an attribute, in
- * text, or inside the RSC payload's JSON strings. No counts: the Worker
- * doesn't decode the lists, which is where they'd come from.
+ * What the `<head>` says about a found profile. Made of the handle
+ * (`[a-z0-9_-]`), the display name (stripped of everything HTML and JSON give
+ * meaning to, and of a leading `$`, by `readDisplayName`) and fixed words, so
+ * it needs no escaping in an attribute, in text, or inside the RSC payload's
+ * JSON strings. With a name, the handle is beside it, so the address is never
+ * hidden behind a name anyone could choose. No counts: the Worker doesn't
+ * decode the lists, which is where they'd come from.
  */
 export function describeProfile(
   handle: string,
+  displayName: string | undefined,
   sections: Sections,
   origin: string,
 ) {
   return {
-    title: `${handle}'s films`,
-    description: `${describeContents(handle, sections)}, on Clusterflick: every film showing in London.`,
+    title: displayName ? `${displayName} (@${handle})` : `${handle}'s films`,
+    description: `${describeContents(
+      displayName ? `${displayName} (@${handle})` : handle,
+      sections,
+    )}, on Clusterflick: every film showing in London.`,
     url: `${origin}/u/${handle}/`,
   };
 }
@@ -92,6 +103,7 @@ export async function fillShell(
   if (data.found) {
     const { title, description, url } = describeProfile(
       data.handle,
+      data.displayName,
       data.sections,
       origin,
     );

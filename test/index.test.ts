@@ -152,7 +152,7 @@ describe("a public profile", () => {
       .filter(({ url }) => url.endsWith(":batchGet"))
       .map(({ body }) => JSON.parse(body!).mask.fieldPaths.sort());
     expect(masks).toEqual([
-      ["handle", "public", "publicProfile", "sections"],
+      ["displayName", "handle", "links", "public", "publicProfile", "sections"],
       ["favouriteVenues", "films", "people", "seen", "watchlist"],
     ]);
   });
@@ -340,6 +340,118 @@ describe("the sections shown", () => {
     serve({ store: reader(sections) });
     const { html } = await readProfileData(await get("/u/film-fan/"));
     expect(html).toContain(`<meta name="description" content="${description}`);
+  });
+});
+
+describe("the name and links", () => {
+  function reader(profile: Record<string, unknown>) {
+    const store = publicReader("film-fan");
+    return {
+      ...store,
+      "users/uid1/meta/profile": {
+        handle: "film-fan",
+        public: true,
+        ...profile,
+      },
+    };
+  }
+
+  /**
+   * The RSC payload's strings, read as the browser would: the script's
+   * argument as JavaScript, then the string inside it as JSON. Throws if the
+   * name broke either.
+   */
+  function readPayload(html: string) {
+    const script = html.match(/self\.__next_f\.push\((.*?)\)<\/script>/s)?.[1];
+    if (!script) throw new Error("No payload");
+    const [, text] = JSON.parse(script) as [number, string];
+    return JSON.parse(text) as [
+      string,
+      string,
+      string,
+      Record<string, string>,
+    ][];
+  }
+
+  it("sends them, and the head is the name beside the handle", async () => {
+    serve({
+      store: reader({
+        displayName: "Siobhán O'Brien",
+        links: { letterboxd: "film_fan", imdb: "ur1234567" },
+      }),
+    });
+    const { html, data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.displayName).toBe("Siobhán O'Brien");
+    expect(data.links).toEqual({ letterboxd: "film_fan", imdb: "ur1234567" });
+    const title = "Siobhán O'Brien (@film-fan)";
+    expect(html).toContain(`<title>${title} | Clusterflick</title>`);
+    expect(html).toContain(`<meta property="og:title" content="${title}"`);
+    expect(html).toContain(
+      `The films ${title} has seen and wants to see, on Clusterflick`,
+    );
+    const [titleTag, description] = readPayload(html);
+    expect(titleTag[3].children).toBe(`${title} | Clusterflick`);
+    expect(description[3].content).toMatch(/^The films Siobhán O'Brien/);
+  });
+
+  it("strips a name that would break the page, and it stays plain text everywhere", async () => {
+    serve({
+      store: reader({
+        displayName: '$"><script>alert(1)</script>\\ & \u2028x\u202Ey',
+      }),
+    });
+    const { html, data } = await readProfileData(await get("/u/film-fan/"));
+    const name = "scriptalert(1)/script xy";
+    expect(data.displayName).toBe(name);
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain(`<title>${name} (@film-fan) | Clusterflick</title>`);
+    expect(html).toContain(
+      `<meta property="og:title" content="${name} (@film-fan)"`,
+    );
+    expect(readPayload(html)[0][3].children).toBe(
+      `${name} (@film-fan) | Clusterflick`,
+    );
+  });
+
+  it("drops a leading $, which the payload would read as a reference", async () => {
+    serve({ store: reader({ displayName: "$$ Money" }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.displayName).toBe("Money");
+  });
+
+  it.each([
+    ["too long", "é".repeat(51)],
+    ["nothing left once stripped", "<<>>"],
+    ["not a string", 42],
+  ])(
+    "a name %s is no name, and the head is the handle's",
+    async (_, displayName) => {
+      serve({ store: reader({ displayName }) });
+      const { html, data } = await readProfileData(await get("/u/film-fan/"));
+      expect(data).not.toHaveProperty("displayName");
+      expect(html).toContain("<title>film-fan's films | Clusterflick</title>");
+    },
+  );
+
+  it("drops links it can't show", async () => {
+    serve({
+      store: reader({
+        links: {
+          letterboxd: "film_fan/../x",
+          imdb: "ur99",
+          website: "javascript:alert(1)",
+          twitter: "film_fan",
+        },
+      }),
+    });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.links).toEqual({ imdb: "ur99" });
+  });
+
+  it("sends no links as none", async () => {
+    serve({ store: reader({}) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.links).toEqual({});
   });
 });
 

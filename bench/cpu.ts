@@ -79,6 +79,7 @@ for (const seen of [2000, 10000]) {
     toScriptJson({
       found: true,
       handle: "film-fan",
+      links: {},
       sections: readSections(undefined),
       documents: text.replaceAll(UID, "-"),
     });

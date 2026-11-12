@@ -49,7 +49,8 @@ Three requests to Firestore's REST API, as a service account:
 
 1. `handles/{handle}`, which holds the owner's uid.
 2. A `batchGet` of `users/{uid}/meta/profile` (`handle`, `public`,
-   `sections`) and `users/{uid}/meta/capabilities` (`publicProfile`).
+   `sections`, `displayName`, `links`) and `users/{uid}/meta/capabilities`
+   (`publicProfile`).
 3. Only if the profile is to be shown, a `batchGet` of `users/{uid}` (`seen`,
    `watchlist`, `favouriteVenues`) and `users/{uid}/meta/films` (`films`,
    `people`: each film's details, for the Seen stats), for the sections the
@@ -87,6 +88,29 @@ A profile is shown only when all of these hold:
 - the profile is `public`
 - the reader has the `publicProfile` capability
 
+### Name and links
+
+`displayName` is shown in place of the handle, and `links` are the reader's
+Letterboxd username, IMDb user id (`ur…`) and an https website. The site's
+rules refuse anything else, but the Admin SDK skips the rules, so both are
+checked again as they're read:
+
+- **The name is stripped, not escaped.** `"` `&` `<` `>` `\`, control
+  characters, the line and paragraph separators, and the bidirectional
+  embeddings, overrides and isolates are taken out, spaces collapsed, and a
+  leading `$` dropped. What's left is plain text in the `<title>`, in an
+  attribute, and inside the RSC payload, where it sits in a JSON string inside
+  a JavaScript string and a string starting with `$` would be read as a
+  reference. An apostrophe is kept (O'Brien): nothing it's written into is
+  quoted with one. Too long (over 50 characters) or empty is no name.
+- **A link that doesn't match its pattern is dropped**, and the others kept.
+  The page builds each address from the identifier, so nothing a reader
+  types becomes a link anywhere but their website.
+
+The site keeps the same lists (`FORBIDDEN_NAME_RANGES` and the link patterns
+in `src/lib/user-profile/identity.ts`, and `firestore.rules`): change them
+together.
+
 ## What it sends
 
 The page gets this, as `<script type="application/json" id="profile-data">` in
@@ -96,6 +120,8 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
 {
   "found": true,
   "handle": "film-fan",
+  "displayName": "Siobhán O'Brien",
+  "links": { "letterboxd": "film_fan", "imdb": "ur1234567" },
   "sections": { "watchlist": true, "seen": true, "seenStats": true, "favouriteVenues": false },
   "documents": [
     { "found": { "name": "projects/…/documents/users/-", "fields": { "seen": { "mapValue": { … } } } } },
@@ -116,8 +142,11 @@ its owner why their profile isn't showing.
 For a public profile the Worker also describes it in the `<head>`: the title
 and description, the Open Graph and Twitter tags, a canonical link to
 `/u/<handle>/`, and `robots` of `index, follow`. Making a profile public is the
-consent to its being found. The description names only what the page shows
-("The films film-fan has seen", with the watchlist hidden). It is never in
+consent to its being found. With a display name the title is the name beside
+the handle ("Siobhán O'Brien (@film-fan)"), so the address is never hidden
+behind a name anyone could choose; without one, "film-fan's films". The
+description names only what the page shows ("The films film-fan has seen",
+with the watchlist hidden). It is never in
 the sitemap. A not-found page gets
 `noindex`, and keeps the shell's generic title.
 
