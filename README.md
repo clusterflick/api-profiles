@@ -172,6 +172,17 @@ everywhere in the page, the payload included. They must match the site's
 Worker logs an error and the page keeps the shell's. The Open Graph and Twitter
 tags are only rewritten in the HTML as sent, which is what link previews read.
 
+A link to a profile previews with the poster of its first favourite that has
+one, in place of the site's image: `og:image` and `twitter:image` become the
+TMDB poster at 500px wide, `twitter:card` becomes `summary` (a portrait
+poster beside the text rather than cropped into a wide banner), the site
+image's `og:image:width` and `og:image:height` are removed rather than left
+wrong, and the alt text is "<name>'s favourite film", made of the stripped
+name or the handle and never the film's title. It's only ever a TMDB image at
+a path `readFavourites` has checked, so nothing a reader uploads is shown
+under the site's name. Without a poster among the favourites, the preview is
+the site's.
+
 ## CPU
 
 Workers Free allows 10ms of CPU a request. Firestore's REST format is two to

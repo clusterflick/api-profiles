@@ -534,6 +534,40 @@ describe("favourite films", () => {
     expect(data.favourites).toEqual([]);
   });
 
+  it("lend the first one with a poster to the link preview", async () => {
+    serve({
+      store: reader({
+        displayName: "Siobhán O'Brien",
+        favourites: [{ id: "100", title: "No Poster" }, film(2), film(3)],
+      }),
+    });
+    const { html } = await readProfileData(await get("/u/film-fan/"));
+    const poster = "https://image.tmdb.org/t/p/w500/poster-2.jpg";
+    expect(html).toContain(`<meta property="og:image" content="${poster}"`);
+    expect(html).toContain(`<meta name="twitter:image" content="${poster}"`);
+    expect(html).toContain('<meta name="twitter:card" content="summary"');
+    expect(html).toContain(
+      `<meta property="og:image:alt" content="Siobhán O'Brien's favourite film"`,
+    );
+    // The site image's size, which isn't the poster's.
+    expect(html).not.toContain("og:image:width");
+    expect(html).not.toContain("og:image:height");
+  });
+
+  it("leave the site's preview image without a poster among them", async () => {
+    serve({
+      store: reader({ favourites: [{ id: "100", title: "No Poster" }] }),
+    });
+    const { html } = await readProfileData(await get("/u/film-fan/"));
+    expect(html).toContain(
+      '<meta property="og:image" content="https://clusterflick.com/images/og-image.png"/>',
+    );
+    expect(html).toContain(
+      '<meta name="twitter:card" content="summary_large_image"/>',
+    );
+    expect(html).toContain('<meta property="og:image:width" content="1200"/>');
+  });
+
   it("escapes a title that would close the script tag", async () => {
     const title = "</script><script>alert(1)</script>";
     serve({ store: reader({ favourites: [{ id: "101", title }] }) });
