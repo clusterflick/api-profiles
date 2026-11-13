@@ -100,7 +100,9 @@ export type Links = Partial<Record<"letterboxd" | "imdb" | "website", string>>;
 const LINK_PATTERNS = {
   // Letters, numbers and underscores, as Letterboxd allows: no hyphens.
   letterboxd: /^[A-Za-z0-9_]{1,50}$/,
-  imdb: /^ur[0-9]{1,12}$/,
+  // IMDb user ids: `ur` and digits for older accounts, `p.` and lowercase
+  // letters and digits for newer ones.
+  imdb: /^(?:ur[0-9]{1,12}|p\.[a-z0-9]{1,40})$/,
   website: /^https:\/\/[^\s<>"\\]{1,192}$/,
 } as const;
 
