@@ -91,7 +91,7 @@ A profile is shown only when all of these hold:
 ### Name and links
 
 `displayName` is shown in place of the handle, and `links` are the reader's
-Letterboxd username, IMDb user id (`ur…`) and an https website. The site's
+Letterboxd username, IMDb user id (`ur…` or, for newer accounts, `p.…`) and an https website. The site's
 rules refuse anything else, but the Admin SDK skips the rules, so both are
 checked again as they're read:
 
@@ -133,7 +133,7 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
   "found": true,
   "handle": "film-fan",
   "displayName": "Siobhán O'Brien",
-  "links": { "letterboxd": "film_fan", "imdb": "ur1234567" },
+  "links": { "letterboxd": "film_fan", "imdb": "p.mbd2yexnoms6latfrdkzba2zxy" },
   "favourites": [{ "id": "949", "title": "Heat", "year": "1995", "posterPath": "/heat.jpg" }],
   "sections": { "watchlist": true, "seen": true, "seenStats": true, "favouriteVenues": false },
   "documents": [

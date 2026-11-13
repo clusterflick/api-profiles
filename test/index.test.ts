@@ -385,12 +385,18 @@ describe("the name and links", () => {
     serve({
       store: reader({
         displayName: "Siobhán O'Brien",
-        links: { letterboxd: "film_fan", imdb: "ur1234567" },
+        links: {
+          letterboxd: "film_fan",
+          imdb: "p.mbd2yexnoms6latfrdkzba2zxy",
+        },
       }),
     });
     const { html, data } = await readProfileData(await get("/u/film-fan/"));
     expect(data.displayName).toBe("Siobhán O'Brien");
-    expect(data.links).toEqual({ letterboxd: "film_fan", imdb: "ur1234567" });
+    expect(data.links).toEqual({
+      letterboxd: "film_fan",
+      imdb: "p.mbd2yexnoms6latfrdkzba2zxy",
+    });
     const title = "Siobhán O'Brien (@film-fan)";
     expect(html).toContain(`<title>${title} | Clusterflick</title>`);
     expect(html).toContain(`<meta property="og:title" content="${title}"`);
@@ -454,6 +460,12 @@ describe("the name and links", () => {
     });
     const { data } = await readProfileData(await get("/u/film-fan/"));
     expect(data.links).toEqual({ imdb: "ur99" });
+  });
+
+  it("drops an IMDb id of neither kind", async () => {
+    serve({ store: reader({ links: { imdb: "p.Has-Capitals" } }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.links).toEqual({});
   });
 
   it("sends no links as none", async () => {
