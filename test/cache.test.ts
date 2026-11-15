@@ -14,7 +14,7 @@ import {
   type MockInstance,
 } from "vitest";
 import { FRESH_MS, getProfileCache, STALE_MAX_MS } from "../src/cache";
-import { clearAccessToken } from "../src/google-auth";
+import { clearAccessToken } from "@clusterflick/accounts/google-auth";
 import { handleRequest } from "../src/index";
 import { handlePurge } from "../src/purge";
 import {

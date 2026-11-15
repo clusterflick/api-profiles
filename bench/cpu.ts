@@ -11,8 +11,12 @@
  *
  *   npm run bench:cpu
  */
-import type { Fields } from "../src/firestore";
-import { readFavouriteVenues, readFilmDetails, readList } from "../src/lists";
+import type { Fields } from "@clusterflick/accounts/firestore";
+import {
+  readFavouriteVenues,
+  readFilmDetails,
+  readList,
+} from "@clusterflick/accounts/lists";
 import { readSections } from "../src/profile";
 import { toScriptJson } from "../src/shell";
 import { encodeValue } from "../test/helpers";

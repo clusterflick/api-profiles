@@ -12,15 +12,16 @@
     "bench:cpu": "esbuild bench/cpu.ts --bundle --platform=node --format=esm --log-level=warning | node --input-type=module"
   },
   "dependencies": {
+    "@clusterflick/accounts": "0.1.0",
     "@fontsource/montserrat": "5.3.0",
     "@jsquash/jpeg": "1.6.0",
     "@resvg/resvg-wasm": "2.6.2",
-    "jose": "^6.2.12",
     "satori": "0.32.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.2.8",
     "esbuild": "^0.28.2",
+    "jose": "^6.2.17",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "vitest": "~4.1.0",

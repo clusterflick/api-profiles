@@ -1,4 +1,14 @@
-import { decodeValue, type Firestore, type Value } from "./firestore";
+import {
+  capabilitiesPath,
+  CapabilityId,
+  isGranted,
+} from "@clusterflick/accounts/capabilities";
+import {
+  decodeValue,
+  isUid,
+  type Firestore,
+  type Value,
+} from "@clusterflick/accounts/firestore";
 import {
   readFavouriteVenues,
   readFilmDetails,
@@ -6,7 +16,7 @@ import {
   type FavouriteVenue,
   type FilmDetailsData,
   type List,
-} from "./lists";
+} from "@clusterflick/accounts/lists";
 
 /**
  * The sections a reader can show or hide on their profile, as the site's
@@ -201,11 +211,6 @@ export type ProfileData =
     }
   | { found: false; handle?: string };
 
-/** A uid as a document path segment: anything else is a hand edit gone wrong. */
-function isUid(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9]{1,128}$/.test(value);
-}
-
 /** A found profile, as the page is sent it. */
 export type FoundProfile = Extract<ProfileData, { found: true }>;
 
@@ -243,7 +248,7 @@ async function loadProfileOf(
   uid: string,
 ): Promise<FoundProfile | null> {
   const [profile, capabilities] = await db.batchGet(
-    [`users/${uid}/meta/profile`, `users/${uid}/meta/capabilities`],
+    [`users/${uid}/meta/profile`, capabilitiesPath(uid)],
     [
       "handle",
       "public",
@@ -251,13 +256,12 @@ async function loadProfileOf(
       "displayName",
       "links",
       "favourites",
-      "publicProfile",
+      CapabilityId.PublicProfile,
     ],
   );
   if (!profile?.handle || decodeValue(profile.handle) !== handle) return null;
   if (!profile.public || decodeValue(profile.public) !== true) return null;
-  // Granted is the key being there, as the rules and the site read it.
-  if (!capabilities || !("publicProfile" in capabilities)) return null;
+  if (!isGranted(capabilities, CapabilityId.PublicProfile)) return null;
 
   const sections = readSections(profile.sections);
   const fields = getPublishedFields(sections);

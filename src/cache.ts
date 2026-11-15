@@ -2,8 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import { renderCard } from "./card";
 import { CARD_ASSETS } from "./card-assets";
 import { fetchPoster, getCardFilms, getCardHash } from "./card-content";
-import { Firestore } from "./firestore";
-import { getAccessToken } from "./google-auth";
+import { Firestore } from "@clusterflick/accounts/firestore";
+import { getAccessToken } from "@clusterflick/accounts/google-auth";
 import { loadProfile, type ProfileData } from "./profile";
 
 /**

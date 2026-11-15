@@ -1,4 +1,9 @@
-import { AuthError, getBearerToken, verifyFirebaseToken } from "./auth";
+import {
+  AuthError,
+  getBearerToken,
+  verifyFirebaseToken,
+} from "@clusterflick/accounts/auth";
+import { isUid } from "@clusterflick/accounts/firestore";
 import { getProfileCache, getUidIndex } from "./cache";
 import { HANDLE_PATTERN } from "./routes";
 
@@ -7,7 +12,6 @@ export const PURGE_PATH = "/api/profiles/purge";
 /** A rename names two: the handle given up and the one taken. */
 const MAX_HANDLES = 2;
 const MAX_BODY_BYTES = 1024;
-const UID_PATTERN = /^[A-Za-z0-9]{1,128}$/;
 
 function json(body: unknown, status: number, headers: HeadersInit = {}) {
   return Response.json(body, {
@@ -50,10 +54,7 @@ async function parseBody(request: Request): Promise<PurgeBody | string> {
   ) {
     return `handles must be up to ${MAX_HANDLES} valid handles`;
   }
-  if (
-    uid !== undefined &&
-    !(typeof uid === "string" && UID_PATTERN.test(uid))
-  ) {
+  if (uid !== undefined && !isUid(uid)) {
     return "uid must be a uid";
   }
   return { ...(uid !== undefined && { uid }), handles };

@@ -11,7 +11,7 @@ import {
 } from "vitest";
 import { getProfileCache } from "../src/cache";
 import { CARD_VERSION, getCardFilms, getCardHash } from "../src/card-content";
-import { clearAccessToken } from "../src/google-auth";
+import { clearAccessToken } from "@clusterflick/accounts/google-auth";
 import { handleRequest } from "../src/index";
 import { handlePurge } from "../src/purge";
 import {

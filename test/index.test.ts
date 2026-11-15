@@ -3,7 +3,10 @@ import { env } from "cloudflare:workers";
 import { jwtVerify } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getCardHash } from "../src/card-content";
-import { clearAccessToken, getAccessToken } from "../src/google-auth";
+import {
+  clearAccessToken,
+  getAccessToken,
+} from "@clusterflick/accounts/google-auth";
 import { handleRequest } from "../src/index";
 import {
   fakeUpstreams,
