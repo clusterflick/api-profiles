@@ -1,3 +1,5 @@
+import { CARD_HEIGHT, CARD_WIDTH } from "./card";
+import { cardFileName, getCardFilms, getCardHash } from "./card-content";
 import type { ProfileData, Sections } from "./profile";
 
 /**
@@ -65,34 +67,24 @@ export function describeProfile(
   };
 }
 
-/** The image size the poster is linked at: TMDB's, 500px wide. */
-const POSTER_SIZE = "w500";
-
 /**
- * What a link to the profile previews with: the poster of the reader's
- * first favourite that has one, rather than the site's own image. Only ever
- * a TMDB image, at a path `readFavourites` has already checked, so nothing a
- * reader uploads is ever shown under the site's name. The alt text is made of
- * the name and handle, already safe here, and never the film's title, the
- * one thing a reader types that isn't stripped. Undefined without a poster,
- * leaving the site's image.
+ * What a link to the profile previews with: its card (`card.ts`), drawn from
+ * the favourites' posters, at an address that changes with them. Undefined
+ * when no favourite has a poster, leaving the site's image. The alt text is
+ * made of the name and handle, already safe here, never a film's title.
  */
-export function describeProfileImage(
+export async function describeProfileCard(
   data: Extract<ProfileData, { found: true }>,
+  origin: string,
 ) {
-  const favourite = data.favourites.find((film) => film.posterPath);
-  if (!favourite?.posterPath) return undefined;
+  const films = getCardFilms(data.favourites);
+  if (films.length === 0) return undefined;
+  const hash = await getCardHash(data.handle, films);
   return {
-    url: `https://image.tmdb.org/t/p/${POSTER_SIZE}${favourite.posterPath}`,
-    alt: `${data.displayName ?? data.handle}'s favourite film`,
+    url: `${origin}/u/${data.handle}/${cardFileName(hash)}`,
+    alt: `${data.displayName ?? data.handle}'s favourite films`,
   };
 }
-
-const remove = {
-  element(element: Element) {
-    element.remove();
-  },
-};
 
 function setAttribute(name: string, value: string) {
   return {
@@ -149,19 +141,25 @@ export async function fillShell(
         setAttribute("content", description),
       );
 
-    const image = describeProfileImage(data);
-    if (image) {
+    const card = await describeProfileCard(data, origin);
+    if (card) {
       rewriter = rewriter
-        .on('meta[property="og:image"]', setAttribute("content", image.url))
-        .on('meta[property="og:image:alt"]', setAttribute("content", image.alt))
-        // The shell's are the site image's; a poster's are its own, and
-        // TMDB's aren't all exactly 2:3, so none rather than wrong ones.
-        .on('meta[property="og:image:width"]', remove)
-        .on('meta[property="og:image:height"]', remove)
-        .on('meta[name="twitter:image"]', setAttribute("content", image.url))
-        // A portrait poster as a thumbnail beside the text, rather than
-        // cropped into the wide banner `summary_large_image` draws.
-        .on('meta[name="twitter:card"]', setAttribute("content", "summary"));
+        .on('meta[property="og:image"]', setAttribute("content", card.url))
+        .on('meta[property="og:image:alt"]', setAttribute("content", card.alt))
+        .on(
+          'meta[property="og:image:width"]',
+          setAttribute("content", String(CARD_WIDTH)),
+        )
+        .on(
+          'meta[property="og:image:height"]',
+          setAttribute("content", String(CARD_HEIGHT)),
+        )
+        .on('meta[name="twitter:image"]', setAttribute("content", card.url))
+        // The card is drawn for the wide banner, which the shell asks for.
+        .on(
+          'meta[name="twitter:card"]',
+          setAttribute("content", "summary_large_image"),
+        );
     }
   } else {
     head += `<meta name="robots" content="noindex"/>`;

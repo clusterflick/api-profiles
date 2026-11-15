@@ -54,10 +54,16 @@
       "simple": { "limit": 60, "period": 60 },
     },
   ],
+  // The profile card's font, bundled as bytes (src/card-assets.ts). `.wasm`
+  // is wrangler's default, precompiled.
+  "rules": [{ "type": "Data", "globs": ["**/*.woff"], "fallthrough": true }],
   // api-tmdb-search has 8787; the site's `next dev` sends /u/* here.
   "dev": { "port": 8788 },
   // Workers Paid has no spend cap, so a ceiling per request. A 10,000-film
-  // profile costs ~80ms (`npm run bench:cpu`), so this is headroom, not a fit.
-  "limits": { "cpu_ms": 1000 },
+  // profile costs ~80ms (`npm run bench:cpu`); drawing a profile's card took
+  // 350-440ms in Node on an M-series Mac, more in an isolate's first, which
+  // sets up its WebAssembly. Headroom, not a fit: lower it once Workers Logs
+  // show what cards really cost.
+  "limits": { "cpu_ms": 3000 },
   "observability": { "enabled": true },
 }

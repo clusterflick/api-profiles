@@ -1,4 +1,5 @@
 import { getProfileCache } from "./cache";
+import { cardFileName } from "./card-content";
 import type { ProfileData } from "./profile";
 import { handlePurge, PURGE_PATH } from "./purge";
 import { matchRoute } from "./routes";
@@ -50,6 +51,66 @@ function limited() {
   });
 }
 
+/**
+ * How long a card may be kept by whoever fetched it. Short, so a profile made
+ * private stops showing in a browser's copy within the cache's own five
+ * minutes; a site that has stored its own preview can't be reached either way.
+ */
+const CARD_MAX_AGE = 5 * 60;
+
+/** The image a link to the profile previews with (`ProfileCache.card`). */
+async function respondWithCard(
+  env: Env,
+  url: URL,
+  handle: string,
+  hash: string,
+  ip: string,
+): Promise<Response> {
+  const result = await getProfileCache(env, handle).card(handle, ip, hash);
+  // Logs only, for the same reasons as a view.
+  console.log(
+    JSON.stringify({ event: "profile-card", handle, state: result.state }),
+  );
+  switch (result.state) {
+    case "hit":
+    case "rendered":
+      return new Response(result.jpeg, {
+        headers: {
+          "Content-Type": "image/jpeg",
+          "Cache-Control": `public, max-age=${CARD_MAX_AGE}`,
+        },
+      });
+    case "redirect":
+      // To the card for the favourites as they are now, so a preview made
+      // before they changed still finds one.
+      return new Response(null, {
+        status: 302,
+        headers: {
+          // Absolute, as the page's `og:image` is: a site fetching a preview
+          // may not resolve a relative one.
+          Location: new URL(
+            `/u/${handle}/${cardFileName(result.hash)}`,
+            url,
+          ).toString(),
+          "Cache-Control": "no-store",
+        },
+      });
+    case "none":
+      // One answer for unknown, private, revoked or posterless, as for a view.
+      return new Response("Not found", {
+        status: 404,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      });
+    case "limited":
+      return limited();
+    case "unavailable":
+      return unavailable("The card couldn't be drawn");
+  }
+}
+
 export async function handleRequest(
   request: Request,
   env: Env,
@@ -80,6 +141,9 @@ export async function handleRequest(
       return await respondWithShell(env, { found: false }, 404);
     }
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    if (route.kind === "card") {
+      return await respondWithCard(env, url, route.handle, route.hash, ip);
+    }
     const cached = await getProfileCache(env, route.handle).load(
       route.handle,
       ip,

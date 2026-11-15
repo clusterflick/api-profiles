@@ -2,6 +2,7 @@ import { reset } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { jwtVerify } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getCardHash } from "../src/card-content";
 import { clearAccessToken, getAccessToken } from "../src/google-auth";
 import { handleRequest } from "../src/index";
 import {
@@ -574,7 +575,7 @@ describe("favourite films", () => {
     expect(data.favourites).toEqual([]);
   });
 
-  it("lend the first one with a poster to the link preview", async () => {
+  it("lend their card to the link preview, at an address made from them", async () => {
     serve({
       store: reader({
         displayName: "Siobhán O'Brien",
@@ -582,16 +583,21 @@ describe("favourite films", () => {
       }),
     });
     const { html } = await readProfileData(await get("/u/film-fan/"));
-    const poster = "https://image.tmdb.org/t/p/w500/poster-2.jpg";
-    expect(html).toContain(`<meta property="og:image" content="${poster}"`);
-    expect(html).toContain(`<meta name="twitter:image" content="${poster}"`);
-    expect(html).toContain('<meta name="twitter:card" content="summary"');
+    const hash = await getCardHash("film-fan", [
+      { id: "102", posterPath: "/poster-2.jpg" },
+      { id: "103", posterPath: "/poster-3.jpg" },
+    ]);
+    const card = `https://clusterflick.com/u/film-fan/card-${hash}.jpg`;
+    expect(html).toContain(`<meta property="og:image" content="${card}"`);
+    expect(html).toContain(`<meta name="twitter:image" content="${card}"`);
     expect(html).toContain(
-      `<meta property="og:image:alt" content="Siobhán O'Brien's favourite film"`,
+      '<meta name="twitter:card" content="summary_large_image"',
     );
-    // The site image's size, which isn't the poster's.
-    expect(html).not.toContain("og:image:width");
-    expect(html).not.toContain("og:image:height");
+    expect(html).toContain(
+      `<meta property="og:image:alt" content="Siobhán O'Brien's favourite films"`,
+    );
+    expect(html).toContain('<meta property="og:image:width" content="1200"');
+    expect(html).toContain('<meta property="og:image:height" content="630"');
   });
 
   it("leave the site's preview image without a poster among them", async () => {

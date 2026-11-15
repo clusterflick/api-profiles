@@ -36,6 +36,7 @@ for the purge.
 | `/u/<Handle>` or `/u/<handle>`                    | 301 → `/u/<handle>/`, lowercased                 |
 | `/u/<handle>/`, public                            | 200, the shell with the profile                  |
 | `/u/<handle>/`, unknown, private or not permitted | 404, the shell in its not-found state            |
+| `/u/<handle>/card-<hash>.jpg`                     | The profile's card; see [The card](#the-card)    |
 | Anything else under `/u/`                         | 404, the same, without reading Firestore         |
 | An IP over its limit of uncached views            | 429, plain text, `Retry-After: 60`               |
 | Firestore, Google or the site failed              | 503, plain text, so nothing is told it's missing |
@@ -273,16 +274,55 @@ everywhere in the page, the payload included. They must match the site's
 Worker logs an error and the page keeps the shell's. The Open Graph and Twitter
 tags are only rewritten in the HTML as sent, which is what link previews read.
 
-A link to a profile previews with the poster of its first favourite that has
-one, in place of the site's image: `og:image` and `twitter:image` become the
-TMDB poster at 500px wide, `twitter:card` becomes `summary` (a portrait
-poster beside the text rather than cropped into a wide banner), the site
-image's `og:image:width` and `og:image:height` are removed rather than left
-wrong, and the alt text is "<name>'s favourite film", made of the stripped
-name or the handle and never the film's title. It's only ever a TMDB image at
-a path `readFavourites` has checked, so nothing a reader uploads is shown
-under the site's name. Without a poster among the favourites, the preview is
-the site's.
+A link to a profile previews with its card, below, in place of the site's
+image: `og:image` and `twitter:image` become the card's address,
+`og:image:width` and `og:image:height` its 1200 by 630, `twitter:card` stays
+`summary_large_image`, and the alt text is "<name>'s favourite films", made
+of the stripped name or the handle and never a film's title. Without a
+poster among the favourites, the preview is the site's.
+
+## The card
+
+`/u/<handle>/card-<hash>.jpg` is a 1200 by 630 JPEG of the reader's favourite
+films' posters, fanned out beside their handle on the site's colours
+(`src/card.ts`). Posters and handle only: a display name is the reader's own
+words, drawn under our name, and could need a font for any script, where a
+handle is `[a-z0-9_-]` and one font, Montserrat Bold, covers every one. Only
+favourites with a poster are drawn, up to four, in the reader's order. A long
+handle shrinks to 36px and then wraps, after a `-` or `_` where it has one.
+
+- **The hash** is the first 12 hex digits of a SHA-256 of the handle, each
+  drawn favourite's id and poster path, and `CARD_VERSION`. A site that has
+  kept a preview of the old favourites fetches a new address when they
+  change; bump `CARD_VERSION` with any change to how a card looks.
+- **The profile is checked on every request**, in its `ProfileCache` as a
+  view checks it, so a card is gone as soon as its page is: a private,
+  revoked, unknown or posterless profile is a bare `404 Not found`. A hash
+  that isn't the current one is a 302 to the one that is.
+- **Drawn once and kept** in the profile's `ProfileCache`, under its hash.
+  Purges leave it, as its hash changes with anything it shows; only the
+  latest is kept, and the alarm deletes it with the copy. A render counts
+  against the per-IP `MISS_LIMIT`. Served with `max-age=300`, so a browser
+  stops showing a private profile's card within the cache's five minutes; a
+  site that has stored its own preview is out of reach either way.
+- **Posters** are fetched from TMDB at 342px wide and handed to Satori as
+  data. A poster that can't be fetched makes the card a 503, and nothing is
+  kept: a card is drawn whole or not at all.
+
+Each request is logged as `{"event":"profile-card","handle","state"}`, with
+`state` one of `hit`, `rendered`, `redirect`, `none`, `limited` or
+`unavailable`.
+
+Satori lays the card out as SVG, resvg draws its pixels and mozjpeg (through
+`@jsquash/jpeg`) encodes them, all three as WebAssembly that wrangler bundles
+precompiled, as a Worker can't compile it at run time; they're set up on the
+first render rather than at start-up. It's a JPEG because it's posters: about
+95KB for four, against 670KB as a PNG. Baseline at quality 85: at 75 the pink
+wordmark's edges soften, and progressive saves 5% for twice the encoding.
+**Satori is pinned at 0.32.0**: from 0.33.0 its standalone build compiles
+WebAssembly as it's imported, which a Worker refuses. The drop shadows a
+design might want cost resvg 2.2s of a 2.4s render, so posters have a thin
+light edge instead.
 
 ## CPU
 
@@ -291,8 +331,10 @@ which is two to three times the size they're stored at. `npm run bench:cpu`
 times that, from parsing Firestore's answer to serialising the script tag:
 about 15ms for 2,000 films with their details and 75ms for 10,000, on an
 M-series Mac. Workers Logs show the real figure per request. `limits.cpu_ms`
-in `wrangler.jsonc` caps a request at 1,000ms: Workers Paid has no spend cap,
-so the limit is the guard against a runaway request.
+in `wrangler.jsonc` caps a request at 3,000ms: Workers Paid has no spend cap,
+so the limit is the guard against a runaway request. It's set for drawing a
+card, 350-440ms in Node, with headroom until Workers Logs show what one really
+costs.
 
 The bench also prints the sizes. Decoding more than halves the raw payload
 (7.4MB to 3.4MB for 10,000 films), but gzip had already taken out most of

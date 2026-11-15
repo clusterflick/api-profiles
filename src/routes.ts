@@ -1,3 +1,5 @@
+import { parseCardFileName } from "./card-content";
+
 /**
  * The site's own check, after lowercasing. The rules refuse any other handle,
  * so a path that fails it can't name a profile and needs no Firestore read.
@@ -7,6 +9,8 @@ export const HANDLE_PATTERN = /^[a-z0-9_-]{3,30}$/;
 export type Route =
   | { kind: "redirect"; location: string; status: 301 | 302 }
   | { kind: "profile"; handle: string }
+  /** The image a link to the profile previews with. */
+  | { kind: "card"; handle: string; hash: string }
   /** `handle` only when the path held a valid one, for the page's owner check. */
   | { kind: "not-found"; handle?: string };
 
@@ -29,9 +33,17 @@ export function matchRoute(url: URL): Route {
   const match = pathname.match(/^\/u\/([^/]+)(\/?)(.*)$/);
   if (!match) return { kind: "not-found" };
   const [, segment, slash, rest] = match;
-  if (rest !== "") return { kind: "not-found" };
-
   const handle = segment.toLowerCase();
+
+  // Only ever linked as the Worker writes it, so not redirected when cased
+  // differently: anything else is simply not a card.
+  if (rest !== "") {
+    const hash = parseCardFileName(rest);
+    return hash && handle === segment && HANDLE_PATTERN.test(handle)
+      ? { kind: "card", handle, hash }
+      : { kind: "not-found" };
+  }
+
   if (!HANDLE_PATTERN.test(handle)) return { kind: "not-found" };
   if (handle !== segment || slash === "") {
     return {

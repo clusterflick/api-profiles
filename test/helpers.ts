@@ -81,7 +81,17 @@ export type FakeOptions = {
   tokenStatus?: number;
   firestoreStatus?: number;
   shellStatus?: number;
+  /** TMDB's image server's answer for every poster. */
+  posterStatus?: number;
 };
+
+/** A 2x3 PNG, standing in for every poster TMDB serves. */
+export const POSTER_PNG = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAEElEQVR4nGP4qJEJRAwoFABiQwkNP0ecRwAAAABJRU5ErkJggg==",
+  ),
+  (c) => c.charCodeAt(0),
+);
 
 /**
  * Stands in for every upstream the Worker calls: Google's token endpoint,
@@ -93,6 +103,7 @@ export function fakeUpstreams({
   tokenStatus = 200,
   firestoreStatus = 200,
   shellStatus = 200,
+  posterStatus = 200,
 }: FakeOptions = {}) {
   const requests: { url: string; body?: string }[] = [];
 
@@ -150,6 +161,14 @@ export function fakeUpstreams({
         );
       }
       return Response.json(toDocument(path));
+    }
+    if (url.hostname === "image.tmdb.org") {
+      if (posterStatus !== 200) {
+        return new Response("unavailable", { status: posterStatus });
+      }
+      return new Response(POSTER_PNG, {
+        headers: { "Content-Type": "image/png" },
+      });
     }
     if (url.href === `${SITE_ORIGIN}/profile-shell/`) {
       if (shellStatus !== 200)

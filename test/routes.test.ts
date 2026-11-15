@@ -37,6 +37,25 @@ describe("matchRoute", () => {
     });
   });
 
+  it("reads a card's address", () => {
+    expect(route("/u/film-fan/card-0123456789ab.jpg")).toEqual({
+      kind: "card",
+      handle: "film-fan",
+      hash: "0123456789ab",
+    });
+  });
+
+  it.each([
+    "/u/Film-Fan/card-0123456789ab.jpg",
+    "/u/film-fan/card-0123456789AB.jpg",
+    "/u/film-fan/card-0123456789a.jpg",
+    "/u/film-fan/card-0123456789ab.png",
+    "/u/film-fan/card-0123456789ab.jpg/",
+    "/u/ab/card-0123456789ab.jpg",
+  ])("%s is not a card", (path) => {
+    expect(route(path)).toEqual({ kind: "not-found" });
+  });
+
   it.each([
     "/u/ab/",
     "/u/ab",
