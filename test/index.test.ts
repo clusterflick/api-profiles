@@ -3,7 +3,6 @@ import { jwtVerify } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessToken } from "../src/google-auth";
 import { handleRequest } from "../src/index";
-import { decodeFields, type Fields } from "../src/firestore";
 import {
   fakeUpstreams,
   publicReader,
@@ -66,23 +65,6 @@ describe("a public profile", () => {
     addedAt: 1_700_000_000_000 + n,
   });
 
-  /** The documents the page was sent, decoded, by the last part of their names. */
-  function readDocuments(documents: unknown) {
-    return Object.fromEntries(
-      (documents as { found?: { name: string; fields?: Fields } }[]).flatMap(
-        ({ found }) =>
-          found
-            ? [
-                [
-                  found.name.split("/").slice(-2).join("/"),
-                  decodeFields(found.fields),
-                ],
-              ]
-            : [],
-      ),
-    );
-  }
-
   it("is the shell, with the profile in it and its head describing it", async () => {
     serve({
       store: {
@@ -107,20 +89,20 @@ describe("a public profile", () => {
     const { html, data } = await readProfileData(response);
     expect(data.found).toBe(true);
     expect(data.handle).toBe("film-fan");
-    expect(readDocuments(data.documents)).toEqual({
-      // The uid is taken out of the names.
-      "users/-": {
-        seen: { "101": film(1), "102": { title: "No Year", addedAt: 5 } },
-        watchlist: { "201": film(2) },
-        favouriteVenues: { "venue-1": { name: "The Rio", addedAt: 1 } },
-      },
-      "meta/films": {
-        films: {
-          "101": { genres: ["18"], directors: ["9"], cast: [], runtime: 101 },
-        },
-        people: { "9": "Agnès Varda" },
-      },
+    expect(data.lists).toEqual({
+      seen: { "101": film(1), "102": { title: "No Year", addedAt: 5 } },
+      watchlist: { "201": film(2) },
     });
+    expect(data.favouriteVenues).toEqual({
+      "venue-1": { name: "The Rio", addedAt: 1 },
+    });
+    expect(data.filmDetails).toEqual({
+      films: {
+        "101": { genres: ["18"], directors: ["9"], cast: [], runtime: 101 },
+      },
+      people: { "9": "Agnès Varda" },
+    });
+    expect(data).not.toHaveProperty("documents");
     expect(html).toContain("<title>film-fan's films | Clusterflick</title>");
     // Replaced in the RSC payload too, or the browser would put them back.
     expect(html).not.toContain("Profile Not Found");
@@ -182,21 +164,64 @@ describe("a public profile", () => {
     );
     serve({ store: publicReader("film-fan", "uid1", { seen }) });
     const { data } = await readProfileData(await get("/u/film-fan/"));
-    expect(
-      Object.keys(readDocuments(data.documents)["users/-"].seen as object),
-    ).toHaveLength(3000);
+    expect(Object.keys(data.lists.seen)).toHaveLength(3000);
   });
 
-  it("sends a reader with no film details yet as missing, not as an error", async () => {
+  it("sends a reader with no film details yet as none, not as an error", async () => {
     serve({ store: publicReader("film-fan") });
     const response = await get("/u/film-fan/");
     expect(response.status).toBe(200);
     const { data } = await readProfileData(response);
-    expect(data.documents).toContainEqual(
-      expect.objectContaining({
-        missing: expect.stringMatching(/users\/-\/meta\/films$/),
-      }),
-    );
+    expect(data.filmDetails).toEqual({ films: {}, people: {} });
+  });
+
+  it("sends only the details of films on the Seen list, and their people", async () => {
+    serve({
+      store: {
+        ...publicReader("film-fan", "uid1", { seen: { "101": film(1) } }),
+        "users/uid1/meta/films": {
+          films: {
+            "101": { genres: ["18"], directors: ["9"], cast: ["7"] },
+            // Left behind when the film was taken off the list.
+            "999": { genres: ["27"], directors: ["8"], cast: [] },
+          },
+          people: {
+            "7": "Juliette Binoche",
+            "8": "Someone Else",
+            "9": "Varda",
+          },
+        },
+      },
+    });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.filmDetails).toEqual({
+      films: { "101": { genres: ["18"], directors: ["9"], cast: ["7"] } },
+      people: { "7": "Juliette Binoche", "9": "Varda" },
+    });
+  });
+
+  it("drops entries the page can't draw, and fields it doesn't read", async () => {
+    serve({
+      store: {
+        ...publicReader("film-fan", "uid1", {
+          seen: {
+            "1": { year: "2001" },
+            "2": { title: "Heat", year: 1995, note: "a hand edit" },
+          },
+          favouriteVenues: { rio: { addedAt: 1 }, ica: { name: "ICA" } },
+        }),
+        "users/uid1/meta/films": {
+          films: { "2": { genres: ["80", 3], runtime: "long" } },
+          people: {},
+        },
+      },
+    });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.lists.seen).toEqual({ "2": { title: "Heat", addedAt: 0 } });
+    expect(data.favouriteVenues).toEqual({ ica: { name: "ICA", addedAt: 0 } });
+    expect(data.filmDetails.films).toEqual({
+      "2": { genres: ["80"], directors: [], cast: [] },
+    });
   });
 
   it("escapes a title that would close the script tag", async () => {
@@ -208,9 +233,7 @@ describe("a public profile", () => {
     });
     const { html, data } = await readProfileData(await get("/u/film-fan/"));
     expect(html).not.toContain("<script>alert(1)");
-    expect(readDocuments(data.documents)["users/-"].seen).toEqual({
-      "1": { title, addedAt: 1 },
-    });
+    expect(data.lists.seen).toEqual({ "1": { title, addedAt: 1 } });
   });
 
   it("answers HEAD as GET", async () => {
@@ -313,7 +336,9 @@ describe("the sections shown", () => {
     expect(response.status).toBe(200);
     const { data } = await readProfileData(response);
     expect(listsRequest()).toBeUndefined();
-    expect(data.documents).toEqual([]);
+    expect(data.lists).toEqual({ watchlist: {}, seen: {} });
+    expect(data.favouriteVenues).toEqual({});
+    expect(data.filmDetails).toEqual({ films: {}, people: {} });
   });
 
   it("hides a section the map leaves out, or doesn't set to true", async () => {
@@ -512,7 +537,7 @@ describe("favourite films", () => {
       .filter(({ url }) => url.endsWith(":batchGet"))
       .map(({ body }) => JSON.parse(body!).mask.fieldPaths)[1];
     expect(listsMask).not.toContain("seen");
-    expect(JSON.stringify(data.documents)).not.toContain('"seen"');
+    expect(data.lists.seen).toEqual({});
     expect(html).toContain("Film 3");
   });
 

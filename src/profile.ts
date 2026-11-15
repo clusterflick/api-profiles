@@ -1,4 +1,12 @@
 import { decodeValue, type Firestore, type Value } from "./firestore";
+import {
+  readFavouriteVenues,
+  readFilmDetails,
+  readList,
+  type FavouriteVenue,
+  type FilmDetailsData,
+  type List,
+} from "./lists";
 
 /**
  * The sections a reader can show or hide on their profile, as the site's
@@ -36,7 +44,7 @@ export function readSections(value: Value | undefined): Sections {
 }
 
 /**
- * The fields the page is sent, from `users/{uid}` (the lists and favourite
+ * The fields read for the page, from `users/{uid}` (the lists and favourite
  * venues) and `users/{uid}/meta/films` (each film's details, for the Seen
  * stats), for the sections shown. Nothing else in those documents, nothing
  * from any other, and nothing for a hidden section: the page only draws what
@@ -174,14 +182,10 @@ export function readFavourites(value: Value | undefined): FavouriteFilm[] {
   return favourites;
 }
 
-/** Firestore's `batchGet` answer with nothing in it. */
-const NO_DOCUMENTS = "[]";
-
 /**
- * Everything the page is sent. A found profile carries the sections shown,
- * and `documents`: the documents those need, as Firestore's REST API sent
- * them, as JSON text, for the page to decode. Never the uid, which is taken
- * out of the documents' names.
+ * Everything the page is sent. A found profile carries the sections shown and
+ * the data they draw, decoded: a hidden section's list is empty, and
+ * `sections` is what tells it from a list that is empty. Never the uid.
  */
 export type ProfileData =
   | {
@@ -191,7 +195,9 @@ export type ProfileData =
       links: Links;
       favourites: FavouriteFilm[];
       sections: Sections;
-      documents: string;
+      lists: { watchlist: List; seen: List };
+      favouriteVenues: Record<string, FavouriteVenue>;
+      filmDetails: FilmDetailsData;
     }
   | { found: false; handle?: string };
 
@@ -209,11 +215,8 @@ function isUid(value: unknown): value is string {
  * Admin SDK skips the rules, so a hand edit could leave a stale handle. It's
  * served only when the handle leads to a profile that names it back.
  *
- * Only the three small documents are decoded. The lists and film details are
- * passed on as Firestore sent them: decoding a long Seen list costs more CPU
- * than a Worker on the free plan has, and the page decodes them anyway. They
- * are read only once the checks have passed, so a private profile's lists are
- * never fetched.
+ * The lists and film details are read only once the checks have passed, so a
+ * private profile's lists are never fetched.
  */
 export async function loadProfile(
   db: Firestore,
@@ -245,10 +248,10 @@ export async function loadProfile(
   // With every section hidden there is nothing to ask for, and nothing here
   // should rest on what Firestore does with an empty mask: a mask left unset
   // means every field.
-  const documents =
+  const [user, films] =
     fields.length === 0
-      ? NO_DOCUMENTS
-      : await db.batchGetText(
+      ? [null, null]
+      : await db.batchGet(
           [
             `users/${uid}`,
             // The film details are only for the stats.
@@ -256,7 +259,8 @@ export async function loadProfile(
           ],
           fields,
         );
-  // Each document's name holds the uid; the page needs only its last part.
+  // Masked to the shown sections already; anything absent reads as empty.
+  const seen = readList(user?.seen);
   const displayName = readDisplayName(profile.displayName);
   return {
     found: true,
@@ -265,6 +269,8 @@ export async function loadProfile(
     links: readLinks(profile.links),
     favourites: readFavourites(profile.favourites),
     sections,
-    documents: documents.replaceAll(uid, "-"),
+    lists: { watchlist: readList(user?.watchlist), seen },
+    favouriteVenues: readFavouriteVenues(user?.favouriteVenues),
+    filmDetails: readFilmDetails(films?.films, films?.people, seen),
   };
 }

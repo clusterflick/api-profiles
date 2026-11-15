@@ -19,20 +19,11 @@ export const SHELL_TITLE = "Profile Not Found | Clusterflick";
 export const SHELL_DESCRIPTION = "No public profile at this address.";
 
 /**
- * As JSON in a script tag. A found profile's documents are spliced in as the
- * text Firestore sent, already JSON, rather than parsed and serialised again.
- * `<` is escaped so a film title can never close the tag; the browser's
- * JSON.parse reads the escape back as `<`.
+ * As JSON in a script tag. `<` is escaped so a film title can never close the
+ * tag; the browser's JSON.parse reads the escape back as `<`.
  */
 export function toScriptJson(data: ProfileData) {
-  const json = data.found
-    ? `{"found":true,"handle":${JSON.stringify(data.handle)},${
-        data.displayName === undefined
-          ? ""
-          : `"displayName":${JSON.stringify(data.displayName)},`
-      }"links":${JSON.stringify(data.links)},"favourites":${JSON.stringify(data.favourites)},"sections":${JSON.stringify(data.sections)},"documents":${data.documents}}`
-    : JSON.stringify(data);
-  return json.replace(/</g, "\\u003c");
+  return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
 /**
@@ -56,8 +47,7 @@ function describeContents(who: string, sections: Sections) {
  * meaning to, and of a leading `$`, by `readDisplayName`) and fixed words, so
  * it needs no escaping in an attribute, in text, or inside the RSC payload's
  * JSON strings. With a name, the handle is beside it, so the address is never
- * hidden behind a name anyone could choose. No counts: the Worker doesn't
- * decode the lists, which is where they'd come from.
+ * hidden behind a name anyone could choose.
  */
 export function describeProfile(
   handle: string,

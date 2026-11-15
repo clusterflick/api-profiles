@@ -134,23 +134,60 @@ The page gets this, as `<script type="application/json" id="profile-data">` in
   "handle": "film-fan",
   "displayName": "Siobhán O'Brien",
   "links": { "letterboxd": "film_fan", "imdb": "p.mbd2yexnoms6latfrdkzba2zxy" },
-  "favourites": [{ "id": "949", "title": "Heat", "year": "1995", "posterPath": "/heat.jpg" }],
-  "sections": { "watchlist": true, "seen": true, "seenStats": true, "favouriteVenues": false },
-  "documents": [
-    { "found": { "name": "projects/…/documents/users/-", "fields": { "seen": { "mapValue": { … } } } } },
-    { "missing": "projects/…/documents/users/-/meta/films" }
-  ]
+  "favourites": [
+    { "id": "949", "title": "Heat", "year": "1995", "posterPath": "/heat.jpg" }
+  ],
+  "sections": {
+    "watchlist": true,
+    "seen": true,
+    "seenStats": true,
+    "favouriteVenues": false
+  },
+  "lists": {
+    "seen": {
+      "949": {
+        "title": "Heat",
+        "year": "1995",
+        "posterPath": "/heat.jpg",
+        "addedAt": 1731628800000
+      }
+    },
+    "watchlist": {}
+  },
+  "favouriteVenues": {},
+  "filmDetails": {
+    "films": {
+      "949": {
+        "genres": ["80", "18"],
+        "directors": ["638"],
+        "cast": ["1158"],
+        "runtime": 170,
+        "language": "en"
+      }
+    },
+    "people": { "638": "Michael Mann", "1158": "Al Pacino" }
+  }
 }
 ```
 
-`documents` is the third request's answer as Firestore sent it, undecoded, with
-the uid in each name replaced by `-`. The page decodes it and draws the profile
-as `/personalise` draws the owner's own, with only the sections shown. It
-needs `sections` to tell a hidden list from an empty one, since both arrive as
-a field that isn't there. Never the uid, the email address, or any field
-outside the mask. A not-found page gets `{ "found": false, "handle": "…" }`;
-the handle is there only when the path held a valid one, so the page can tell
-its owner why their profile isn't showing.
+`lists`, `favouriteVenues` and `filmDetails` are the third request's answer,
+decoded into the shapes the site uses for the owner's own (`UserLists`,
+`FavouriteVenues`, `FilmDetailsData`), so the page draws the profile as
+`/personalise` draws the owner's, with only the sections shown. A hidden
+section's data is never read, so it arrives empty, and the page needs
+`sections` to tell it from one that is empty. An entry the page couldn't draw
+(a list entry with no title, a venue with no name) is dropped, and only the
+fields the page reads are kept. `filmDetails` holds only the films on the Seen
+list and the people credited on them: removing a film from a list leaves its
+details behind in `meta/films`, and nothing else on the page reads them. The
+site reads all of it again with the same rules (`parseProfilePageData` in
+`src/lib/user-profile/page-data.ts`), as it does the name and links: change
+them together.
+
+Never the uid, the email address, or any field outside the mask. A not-found
+page gets `{ "found": false, "handle": "…" }`; the handle is there only when
+the path held a valid one, so the page can tell its owner why their profile
+isn't showing.
 
 For a public profile the Worker also describes it in the `<head>`: the title
 and description, the Open Graph and Twitter tags, a canonical link to
@@ -185,16 +222,18 @@ the site's.
 
 ## CPU
 
-Workers Free allows 10ms of CPU a request. Firestore's REST format is two to
-three times the stored size, and decoding a long Seen list in it costs more
-than that, so the Worker decodes only the three small documents it checks.
-The lists and film details pass through as text: taking out the uid and
-escaping them is all it does to them. `npm run bench:cpu` times that: 0.3ms
-for 2,000 films with their details (1.6MB), 1.1ms for 10,000 (7.4MB), on an
-M-series Mac. Workers Logs show the real figure per request.
+The Worker decodes the lists and film details from Firestore's REST format,
+which is two to three times the size they're stored at. `npm run bench:cpu`
+times that, from parsing Firestore's answer to serialising the script tag:
+about 15ms for 2,000 films with their details and 75ms for 10,000, on an
+M-series Mac. Workers Logs show the real figure per request. `limits.cpu_ms`
+in `wrangler.jsonc` caps a request at 1,000ms: Workers Paid has no spend cap,
+so the limit is the guard against a runaway request.
 
-On the Workers Paid plan, with CPU to spare, the Worker could decode them and
-send the page a smaller payload instead.
+The bench also prints the sizes. Decoding more than halves the raw payload
+(7.4MB to 3.4MB for 10,000 films), but gzip had already taken out most of
+REST's repetition, so on the wire it's about the same. What the decoding saves
+is the browser's work: it parses plain JSON instead of decoding Firestore's.
 
 ## Development
 

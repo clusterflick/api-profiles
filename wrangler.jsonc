@@ -21,5 +21,8 @@
   "secrets": { "required": ["FIREBASE_SERVICE_ACCOUNT"] },
   // api-tmdb-search has 8787; the site's `next dev` sends /u/* here.
   "dev": { "port": 8788 },
+  // Workers Paid has no spend cap, so a ceiling per request. A 10,000-film
+  // profile costs ~80ms (`npm run bench:cpu`), so this is headroom, not a fit.
+  "limits": { "cpu_ms": 1000 },
   "observability": { "enabled": true },
 }
