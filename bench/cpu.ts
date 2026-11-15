@@ -19,7 +19,7 @@ import {
 } from "@clusterflick/accounts/lists";
 import { readSections } from "../src/profile";
 import { toScriptJson } from "../src/shell";
-import { encodeValue } from "../test/helpers";
+import { encodeValue } from "../test/firestore-values";
 
 const UID = "Xy7kQ2mN9pLrT4vB8cD1eF3gH5jK";
 const ROOT = "projects/clusterflick-com/databases/(default)/documents";

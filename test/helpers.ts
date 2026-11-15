@@ -7,6 +7,9 @@ import {
   SignJWT,
   type JWTPayload,
 } from "jose";
+import { encodeFields, encodeValue } from "./firestore-values";
+
+export { encodeValue };
 
 export const PROJECT_ID = "clusterflick-com";
 export const SITE_ORIGIN = "https://clusterflick.com";
@@ -48,30 +51,6 @@ export const SHELL_HTML = `<!DOCTYPE html><html lang="en"><head>
 </head><body><main id="profile"></main>
 <script>self.__next_f.push([1,"[[\\"$\\",\\"title\\",\\"0\\",{\\"children\\":\\"Profile Not Found | Clusterflick\\"}],[\\"$\\",\\"meta\\",\\"1\\",{\\"name\\":\\"description\\",\\"content\\":\\"No public profile at this address.\\"}]]"])</script>
 </body></html>`;
-
-/** A JavaScript value as a Firestore REST value, as the SDK would store it. */
-export function encodeValue(value: unknown): Record<string, unknown> {
-  if (value === null) return { nullValue: null };
-  if (typeof value === "string") return { stringValue: value };
-  if (typeof value === "boolean") return { booleanValue: value };
-  if (typeof value === "number") {
-    return Number.isInteger(value)
-      ? { integerValue: String(value) }
-      : { doubleValue: value };
-  }
-  if (Array.isArray(value)) {
-    return { arrayValue: { values: value.map(encodeValue) } };
-  }
-  return {
-    mapValue: { fields: encodeFields(value as Record<string, unknown>) },
-  };
-}
-
-function encodeFields(data: Record<string, unknown>) {
-  return Object.fromEntries(
-    Object.entries(data).map(([key, value]) => [key, encodeValue(value)]),
-  );
-}
 
 export type Store = Record<string, Record<string, unknown>>;
 
