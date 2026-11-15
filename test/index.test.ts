@@ -1,7 +1,8 @@
+import { reset } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { jwtVerify } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessToken } from "../src/google-auth";
+import { clearAccessToken, getAccessToken } from "../src/google-auth";
 import { handleRequest } from "../src/index";
 import {
   fakeUpstreams,
@@ -14,7 +15,7 @@ import {
   type Store,
 } from "./helpers";
 
-const testEnv = { ...env, FIREBASE_SERVICE_ACCOUNT: SERVICE_ACCOUNT };
+const testEnv = env;
 
 let upstreams: ReturnType<typeof fakeUpstreams>;
 
@@ -36,8 +37,10 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  // Every cached copy and index entry, so each test reads Firestore afresh.
+  await reset();
 });
 
 describe("redirects", () => {
@@ -713,13 +716,11 @@ describe("failures are not 404s", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("a malformed key is a 503", async () => {
-    serve({ store: publicReader("film-fan") });
-    const response = await handleRequest(
-      new Request("https://clusterflick.com/u/film-fan/"),
-      { ...testEnv, FIREBASE_SERVICE_ACCOUNT: "not json" },
+  it("a malformed key can't be used", async () => {
+    serve();
+    await expect(getAccessToken("not json")).rejects.toThrow(
+      "FIREBASE_SERVICE_ACCOUNT isn't JSON",
     );
-    expect(response.status).toBe(503);
   });
 
   it("refuses other methods", async () => {
@@ -756,9 +757,15 @@ describe("the access token", () => {
   });
 
   it("is reused between requests", async () => {
-    serve({ store: publicReader("film-fan") });
+    // Two profiles, as a second view of one is served from its copy.
+    serve({
+      store: {
+        ...publicReader("film-fan"),
+        ...publicReader("cinephile", "uid2"),
+      },
+    });
     await get("/u/film-fan/");
-    await get("/u/film-fan/");
+    await get("/u/cinephile/");
     expect(tokenRequests()).toHaveLength(1);
   });
 

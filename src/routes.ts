@@ -2,7 +2,7 @@
  * The site's own check, after lowercasing. The rules refuse any other handle,
  * so a path that fails it can't name a profile and needs no Firestore read.
  */
-const HANDLE_PATTERN = /^[a-z0-9_-]{3,30}$/;
+export const HANDLE_PATTERN = /^[a-z0-9_-]{3,30}$/;
 
 export type Route =
   | { kind: "redirect"; location: string; status: 301 | 302 }

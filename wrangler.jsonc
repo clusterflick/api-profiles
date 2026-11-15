@@ -8,6 +8,11 @@
   "routes": [
     { "pattern": "clusterflick.com/u/*", "zone_name": "clusterflick.com" },
     { "pattern": "clusterflick.com/u", "zone_name": "clusterflick.com" },
+    // The purge, beside api-tmdb-search's /api/tmdb/*.
+    {
+      "pattern": "clusterflick.com/api/profiles/*",
+      "zone_name": "clusterflick.com",
+    },
   ],
   "workers_dev": false,
   "vars": {
@@ -18,7 +23,37 @@
   },
   // The service account's JSON key, on one line. Set with
   // `wrangler secret put FIREBASE_SERVICE_ACCOUNT`, locally in `.dev.vars`.
-  "secrets": { "required": ["FIREBASE_SERVICE_ACCOUNT"] },
+  // PURGE_SECRET is what the site's scripts send to /api/profiles/purge, as
+  // they run as the service account and have no ID token.
+  "secrets": { "required": ["FIREBASE_SERVICE_ACCOUNT", "PURGE_SECRET"] },
+  // A profile's cached copy, one object per handle, and the handles each
+  // reader's copies are filed under, one per uid (src/cache.ts).
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROFILES", "class_name": "ProfileCache" },
+      { "name": "UID_INDEX", "class_name": "UidIndex" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProfileCache", "UidIndex"] },
+  ],
+  // Per-location and approximate: they deter abuse rather than enforce a
+  // quota. Namespace ids are unique in the account; api-tmdb-search has 1xxx.
+  "ratelimits": [
+    // Uncached profile views per IP: each costs Firestore reads, and a
+    // crawler trying handles would make one for every handle it tried.
+    {
+      "name": "MISS_LIMIT",
+      "namespace_id": "2001",
+      "simple": { "limit": 30, "period": 60 },
+    },
+    // Purges per reader: each makes their next view read Firestore.
+    {
+      "name": "PURGE_LIMIT",
+      "namespace_id": "2002",
+      "simple": { "limit": 60, "period": 60 },
+    },
+  ],
   // api-tmdb-search has 8787; the site's `next dev` sends /u/* here.
   "dev": { "port": 8788 },
   // Workers Paid has no spend cap, so a ceiling per request. A 10,000-film

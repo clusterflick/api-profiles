@@ -7,3 +7,6 @@ FIREBASE_SERVICE_ACCOUNT=
 
 # The site's `next dev`, which serves the shell page.
 SITE_ORIGIN=http://localhost:3000
+
+# What the site's scripts send to /api/profiles/purge. Any value locally.
+PURGE_SECRET=local-purge-secret

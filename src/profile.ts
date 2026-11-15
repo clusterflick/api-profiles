@@ -206,6 +206,15 @@ function isUid(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9]{1,128}$/.test(value);
 }
 
+/** A found profile, as the page is sent it. */
+export type FoundProfile = Extract<ProfileData, { found: true }>;
+
+/**
+ * What a handle leads to: the uid its handle document names, when it names a
+ * valid one, so the cache can be purged by uid; never sent to the page.
+ */
+export type LoadedProfile = { profile: FoundProfile | null; uid?: string };
+
 /**
  * The public profile at a handle, or null when there isn't one to show: no
  * such handle, a private profile, or a capability revoked. All three are the
@@ -221,11 +230,18 @@ function isUid(value: unknown): value is string {
 export async function loadProfile(
   db: Firestore,
   handle: string,
-): Promise<ProfileData | null> {
+): Promise<LoadedProfile> {
   const handleDoc = await db.get(`handles/${handle}`);
   const uid = handleDoc?.uid;
-  if (!isUid(uid)) return null;
+  if (!isUid(uid)) return { profile: null };
+  return { profile: await loadProfileOf(db, handle, uid), uid };
+}
 
+async function loadProfileOf(
+  db: Firestore,
+  handle: string,
+  uid: string,
+): Promise<FoundProfile | null> {
   const [profile, capabilities] = await db.batchGet(
     [`users/${uid}/meta/profile`, `users/${uid}/meta/capabilities`],
     [

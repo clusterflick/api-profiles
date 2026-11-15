@@ -20,10 +20,14 @@ from the data it's given.
 It is the only reader of profile data. Nothing in Firestore is publicly
 readable, so the checks here can't be bypassed by querying Firestore directly.
 
+Each profile is cached in a Durable Object, and the site purges it after any
+change the profile shows (see [Caching](#caching)).
+
 ## Routes
 
 The Worker owns everything under `/u`, on the routes `clusterflick.com/u/*`
-(which also matches `/u/`) and `clusterflick.com/u`.
+(which also matches `/u/`) and `clusterflick.com/u`, and `/api/profiles/*`
+for the purge.
 
 | Request                                           | Response                                         |
 | ------------------------------------------------- | ------------------------------------------------ |
@@ -33,15 +37,75 @@ The Worker owns everything under `/u`, on the routes `clusterflick.com/u/*`
 | `/u/<handle>/`, public                            | 200, the shell with the profile                  |
 | `/u/<handle>/`, unknown, private or not permitted | 404, the shell in its not-found state            |
 | Anything else under `/u/`                         | 404, the same, without reading Firestore         |
+| An IP over its limit of uncached views            | 429, plain text, `Retry-After: 60`               |
 | Firestore, Google or the site failed              | 503, plain text, so nothing is told it's missing |
+| `POST /api/profiles/purge`                        | 204; see [Caching](#caching)                     |
 
 `/u/` redirects temporarily so it can become a directory of people later.
 Handles are `^[a-z0-9_-]{3,30}$`, lowercase everywhere, as the site's
 Firestore rules enforce.
 
 The three kinds of not-found are the same response, byte for byte, so nobody
-can tell a private profile from a missing one. Nothing is cached, so switching
-a profile off takes effect on the next request.
+can tell a private profile from a missing one.
+
+## Caching
+
+Each handle has a Durable Object, `ProfileCache` (`src/cache.ts`): one
+instance worldwide, which every view of that profile reaches. It keeps the
+last copy of what the page is sent and decides when to read Firestore again,
+so a profile costs one read of its documents every five minutes however many
+people view it, and visitors who arrive together share one read.
+
+- **Fresh for five minutes** (`FRESH_MS`). After that, the next view reads
+  Firestore again.
+- **Purged on every change.** The site calls `POST /api/profiles/purge` after
+  any write a profile shows, so a change is live on the next view. The five
+  minutes are the safety net for a purge that never arrived.
+- **The last copy while Firestore is down**, if it's under a day old
+  (`STALE_MAX_MS`); with no copy, or an older one, the view is a 503.
+- **Not-found is cached too**, so a handle tried over and over costs one read
+  every five minutes. Uncached views are limited to 30 a minute per IP
+  (`MISS_LIMIT`), which keeps a crawler trying handles from costing a read for
+  every one: over it, a cached copy is still served, and anything else is a
+  429 that says nothing about the handle.
+- **Gone a day after its last read**, by an alarm, so a handle nobody visits
+  again leaves nothing stored.
+
+A refresh that read Firestore before a purge arrived isn't kept, and isn't
+handed to a view made after the purge: it read the documents before the
+change the purge announces.
+
+Each view is logged as one JSON line, `{"event":"profile-view","handle",
+"state","ageMs"}`, with `state` one of `hit`, `miss`, `refresh`, `stale`,
+`limited` or `unavailable`. Only in the logs: a header saying a copy was
+cached would tell a visitor that someone else had just viewed the profile,
+and could tell a private profile's not-found from a missing one's.
+
+### The purge
+
+`POST /api/profiles/purge` drops a reader's cached copies. A reader is found
+by uid, never by handle: a second Durable Object, `UidIndex`, one per uid,
+holds the handles whose copies hold that reader's documents, filed whenever a
+copy is read from a handle that names them, whether it was shown or not. So a
+purge needs no Firestore read, and the site needs to know nothing but who's
+signed in. An entry lapses a day after it was last filed, as the copy does.
+
+| Caller      | `Authorization`                  | Body                                 |
+| ----------- | -------------------------------- | ------------------------------------ |
+| The site    | `Bearer <the reader's ID token>` | `{}`, or `{ "handles": [old, new] }` |
+| The scripts | `Bearer <PURGE_SECRET>`          | `{ "uid": "…" }`                     |
+
+`handles` (up to two) adds copies the index can't know about: a profile save
+names the handle given up and the one taken, which a visitor may have found
+empty and so cached as not-found. The site's ID token is checked as
+api-tmdb-search checks it (`src/auth.ts` is a copy). The scripts run as the
+service account and have no ID token, so they send `PURGE_SECRET` and name
+the reader.
+
+A purge only ever makes the next view read Firestore, so the worst a caller
+can do is cost reads. Readers are limited to 60 purges a minute
+(`PURGE_LIMIT`). Each purge is logged as `{"event":"profile-purge","via",
+"handles"}`.
 
 ## What it reads
 
@@ -271,8 +335,8 @@ what it passes on, is limited by its code. Create a JSON key for it.
 
 ### First deploy
 
-CI can't create the Worker. `wrangler.jsonc` marks `FIREBASE_SERVICE_ACCOUNT` as
-required, so wrangler refuses to deploy a new Worker without it, and
+CI can't create the Worker. `wrangler.jsonc` marks `FIREBASE_SERVICE_ACCOUNT` and
+`PURGE_SECRET` as required, so wrangler refuses to deploy a new Worker without it, and
 `wrangler secret put` only works on a Worker that already exists. The first
 deploy is from a machine with the key, which creates the Worker and its secret
 together:
@@ -280,6 +344,7 @@ together:
 ```sh
 # A file holding only the secret: `.dev.vars` also points SITE_ORIGIN at localhost.
 node -e 'console.log(`FIREBASE_SERVICE_ACCOUNT=\x27${JSON.stringify(require("./key.json"))}\x27`)' > /tmp/profiles.env
+echo "PURGE_SECRET=$(openssl rand -hex 32)" >> /tmp/profiles.env
 npx wrangler login
 npx wrangler deploy --secrets-file /tmp/profiles.env
 rm /tmp/profiles.env
@@ -289,6 +354,18 @@ Then add the repository secrets `CLOUDFLARE_API_TOKEN` (the "Edit Cloudflare
 Workers" template, scoped to the account and the `clusterflick.com` zone) and
 `CLOUDFLARE_ACCOUNT_ID`, and CI deploys from then on. Delete the key file once
 it's on the Worker.
+
+### Adding PURGE_SECRET to a Worker that already exists
+
+The purge came after the first deploy, so the live Worker needs the secret
+before CI can deploy a `wrangler.jsonc` that requires it:
+
+```sh
+openssl rand -hex 32 | tee /dev/stderr | npx wrangler secret put PURGE_SECRET
+```
+
+and give the same value to the site's scripts as `PROFILES_PURGE_SECRET`
+(see `scripts/lib/purge-profile.js` in the site).
 
 ### Rotating the key
 

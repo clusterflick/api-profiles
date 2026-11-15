@@ -1,8 +1,10 @@
-import { Firestore } from "./firestore";
-import { getAccessToken } from "./google-auth";
-import { loadProfile, type ProfileData } from "./profile";
+import { getProfileCache } from "./cache";
+import type { ProfileData } from "./profile";
+import { handlePurge, PURGE_PATH } from "./purge";
 import { matchRoute } from "./routes";
 import { fillShell, SHELL_PATH } from "./shell";
+
+export { ProfileCache, UidIndex } from "./cache";
 
 /**
  * Not a 404: that would tell the visitor, and search engines, that the profile
@@ -36,10 +38,28 @@ async function respondWithShell(
   return fillShell(shell, data, status, env.SITE_ORIGIN);
 }
 
+/** One IP viewing more uncached profiles a minute than `MISS_LIMIT` allows. */
+function limited() {
+  return new Response("Too many profiles at once. Try again in a minute.", {
+    status: 429,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Retry-After": "60",
+    },
+  });
+}
+
 export async function handleRequest(
   request: Request,
   env: Env,
 ): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/profiles/")) {
+    if (url.pathname === PURGE_PATH) return handlePurge(request, env);
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method not allowed", {
       status: 405,
@@ -47,7 +67,6 @@ export async function handleRequest(
     });
   }
 
-  const url = new URL(request.url);
   const route = matchRoute(url);
   if (route.kind === "redirect") {
     return new Response(null, {
@@ -60,14 +79,31 @@ export async function handleRequest(
     if (route.kind === "not-found") {
       return await respondWithShell(env, { found: false }, 404);
     }
-    const db = new Firestore(env.FIREBASE_PROJECT_ID, () =>
-      getAccessToken(env.FIREBASE_SERVICE_ACCOUNT),
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    const cached = await getProfileCache(env, route.handle).load(
+      route.handle,
+      ip,
     );
-    const profile = await loadProfile(db, route.handle);
+    // Logs only: a header saying a copy was cached would tell a visitor
+    // someone else had just viewed it, and could tell a private profile's
+    // not-found from a missing one's.
+    console.log(
+      JSON.stringify({
+        event: "profile-view",
+        handle: route.handle,
+        state: cached.state,
+        ...("ageMs" in cached && { ageMs: cached.ageMs }),
+      }),
+    );
+    if (!("data" in cached)) {
+      return cached.state === "limited"
+        ? limited()
+        : unavailable("Firestore couldn't be read, with no copy to serve");
+    }
     return await respondWithShell(
       env,
-      profile ?? { found: false, handle: route.handle },
-      profile ? 200 : 404,
+      cached.data,
+      cached.data.found ? 200 : 404,
     );
   } catch (e) {
     return unavailable(e);

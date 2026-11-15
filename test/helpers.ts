@@ -1,21 +1,30 @@
-import { exportPKCS8, generateKeyPair } from "jose";
+import { env } from "cloudflare:workers";
+import {
+  createLocalJWKSet,
+  exportJWK,
+  generateKeyPair,
+  importJWK,
+  SignJWT,
+  type JWTPayload,
+} from "jose";
 
 export const PROJECT_ID = "clusterflick-com";
 export const SITE_ORIGIN = "https://clusterflick.com";
 const ROOT = `projects/${PROJECT_ID}/databases/(default)/documents`;
 
-const { publicKey, privateKey } = await generateKeyPair("RS256", {
-  extractable: true,
-});
-export const SERVICE_ACCOUNT_PUBLIC_KEY = publicKey;
-export const SERVICE_ACCOUNT_EMAIL =
-  "profiles@clusterflick-com.iam.gserviceaccount.com";
-export const SERVICE_ACCOUNT = JSON.stringify({
-  type: "service_account",
-  client_email: SERVICE_ACCOUNT_EMAIL,
-  private_key: await exportPKCS8(privateKey),
-  private_key_id: "test-key",
-});
+/** The service account made up in vitest.config.ts, and its public key. */
+const testEnv = env as unknown as {
+  FIREBASE_SERVICE_ACCOUNT: string;
+  PURGE_SECRET: string;
+  TEST_SERVICE_ACCOUNT_PUBLIC_JWK: string;
+};
+export const SERVICE_ACCOUNT = testEnv.FIREBASE_SERVICE_ACCOUNT;
+export const SERVICE_ACCOUNT_EMAIL = JSON.parse(SERVICE_ACCOUNT).client_email;
+export const SERVICE_ACCOUNT_PUBLIC_KEY = await importJWK(
+  JSON.parse(testEnv.TEST_SERVICE_ACCOUNT_PUBLIC_JWK),
+  "RS256",
+);
+export const PURGE_SECRET = testEnv.PURGE_SECRET;
 
 /**
  * The shell as the site builds it, cut down to what the Worker touches: the
@@ -179,4 +188,35 @@ export async function readProfileData(response: Response) {
     /<script type="application\/json" id="profile-data">(.*?)<\/script>/s,
   )?.[1];
   return { html, data: json === undefined ? undefined : JSON.parse(json) };
+}
+
+/**
+ * Firebase ID tokens for the purge, as api-tmdb-search's tests make them: a
+ * key of our own standing in for Google's, which `handlePurge` is given.
+ */
+const firebaseKeys = await generateKeyPair("RS256");
+export const FIREBASE_TEST_KEYS = createLocalJWKSet({
+  keys: [
+    {
+      ...(await exportJWK(firebaseKeys.publicKey)),
+      kid: "firebase-test-key",
+      alg: "RS256",
+    },
+  ],
+});
+
+export function signFirebaseToken(claims: JWTPayload = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({
+    iss: `https://securetoken.google.com/${PROJECT_ID}`,
+    aud: PROJECT_ID,
+    sub: "uid1",
+    iat: now - 60,
+    exp: now + 3600,
+    auth_time: now - 60,
+    email_verified: true,
+    ...claims,
+  })
+    .setProtectedHeader({ alg: "RS256", kid: "firebase-test-key" })
+    .sign(firebaseKeys.privateKey);
 }
