@@ -494,6 +494,22 @@ describe("the name and links", () => {
     expect(data.links).toEqual({ imdb: "ur99" });
   });
 
+  it.each([
+    ["shorter than 2 characters", "a"],
+    ["longer than 15 characters", "a".repeat(16)],
+  ])("drops a Letterboxd username %s", async (_, letterboxd) => {
+    serve({ store: reader({ links: { letterboxd } }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.links).toEqual({});
+  });
+
+  it("keeps a 15-character Letterboxd username", async () => {
+    const letterboxd = "a".repeat(15);
+    serve({ store: reader({ links: { letterboxd } }) });
+    const { data } = await readProfileData(await get("/u/film-fan/"));
+    expect(data.links).toEqual({ letterboxd });
+  });
+
   it("drops an IMDb id of neither kind", async () => {
     serve({ store: reader({ links: { imdb: "p.Has-Capitals" } }) });
     const { data } = await readProfileData(await get("/u/film-fan/"));
